@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>מערכת ניהול צלצולים</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">🔔 מערכת ניהול צלצולים</div>
+  <button class="btn ghost" style="color:#fff;border-color:rgba(255,255,255,.35)" onclick="App.toggleKiosk()">🖥️ מסך מלא</button>
+  <div class="clock">
+    <span id="hdrTime">--:--:--</span>
+    <small id="hdrDate">טוען…</small>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="sidenav">
+    <button data-view="home" class="active" onclick="App.show('home')">🏠 מסך ראשי</button>
+    <button data-view="bells" onclick="App.show('bells')">🔔 לוח צלצולים</button>
+    <button data-view="calendar" onclick="App.show('calendar')">📅 חגים והשבתות</button>
+    <button data-view="sounds" onclick="App.show('sounds')">🎵 ספריית צלילים</button>
+    <button data-view="settings" onclick="App.show('settings')">⚙️ הגדרות</button>
+  </nav>
+
+  <main class="content">
+
+    <!-- ============ מסך ראשי ============ -->
+    <section class="view active" id="view-home">
+      <div class="status ok" id="statusBanner">
+        <span class="dot"></span>
+        <div>
+          <div class="title" id="statusTitle">טוען…</div>
+          <div class="desc" id="statusDesc"></div>
+        </div>
+        <div class="meta" id="statusMeta"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>⏭️ הצלצול הבא</h2>
+          <div class="next-bell" id="nextBell"><div class="none">אין צלצולים מתוכננים</div></div>
+        </div>
+
+        <div class="card">
+          <h2>🎛️ שליטה מהירה</h2>
+          <div class="row" style="flex-direction:column">
+            <button class="btn big green wide" id="muteBtn" onclick="App.toggleMute()">🔊 צלצולים פעילים</button>
+            <button class="btn big primary wide" onclick="App.openManual()">🔔 הפעל צלצול עכשיו</button>
+            <button class="btn big wide" onclick="App.stopRinging()">⏹️ עצור צלצול מתנגן</button>
+          </div>
+          <div style="margin-top:16px" id="shabbatInfo"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>📋 צלצולי היום <span class="sub" id="todayLabel"></span></h2>
+        <div id="todayList"></div>
+      </div>
+    </section>
+
+    <!-- ============ לוח צלצולים ============ -->
+    <section class="view" id="view-bells">
+      <div class="card">
+        <h2>🔔 לוח הצלצולים השבועי
+          <button class="btn primary" style="margin-inline-start:auto" onclick="App.editBell(null)">➕ הוספת צלצול</button>
+        </h2>
+        <div class="daytabs" id="dayTabs"></div>
+        <div id="bellsList" style="margin-top:14px"></div>
+      </div>
+
+      <div class="card">
+        <h2>🗓️ מבט שבועי <span class="sub">כל הצלצולים לפי יום</span></h2>
+        <div class="scroll"><table id="weekTable"></table></div>
+      </div>
+    </section>
+
+    <!-- ============ חגים והשבתות ============ -->
+    <section class="view" id="view-calendar">
+      <div class="card">
+        <h2>🕯️ שבת ויום טוב <span class="sub">חישוב אוטומטי לפי זמני השקיעה</span></h2>
+        <div id="shabbatSettings"></div>
+      </div>
+
+      <div class="card">
+        <h2>✡️ השבתה אוטומטית בחגים <span class="sub">סמנו באילו ימים המערכת לא תצלצל</span></h2>
+        <div class="grid2" id="holidayFlags"></div>
+      </div>
+
+      <div class="card">
+        <h2>📌 השבתות ידניות וחופשות
+          <button class="btn primary" style="margin-inline-start:auto" onclick="App.editException(null)">➕ הוספת השבתה</button>
+        </h2>
+        <div id="exceptionsList"></div>
+      </div>
+
+      <div class="card">
+        <h2>🔮 מה צפוי בימים הקרובים <span class="sub">בדיקה שהמערכת מחליטה נכון</span></h2>
+        <div class="scroll"><table id="previewTable"></table></div>
+      </div>
+    </section>
+
+    <!-- ============ צלילים ============ -->
+    <section class="view" id="view-sounds">
+      <div class="card">
+        <h2>🎵 ספריית הצלילים <span class="sub">MP3 · WAV · M4A · OGG</span></h2>
+        <input type="file" id="soundFile" accept=".mp3,.wav,.m4a,.ogg,.wma,.aac" hidden onchange="App.uploadSound(event)">
+        <button class="btn primary wide big" onclick="document.getElementById('soundFile').click()">📤 העלאת צלצול מהמחשב</button>
+        <p style="color:var(--muted);font-size:12px;margin-top:8px">הקובץ נשמר בתוך המערכת וזמין לכל צלצול. גודל מרבי 25MB.</p>
+        <div id="soundsList" style="margin-top:16px"></div>
+      </div>
+    </section>
+
+    <!-- ============ הגדרות ============ -->
+    <section class="view" id="view-settings">
+      <div class="grid2">
+        <div class="card">
+          <h2>📍 מיקום המוסד</h2>
+          <label class="field"><span>עיר</span>
+            <select id="setCity" onchange="App.cityChanged()"></select>
+          </label>
+          <div class="row">
+            <label class="field" style="flex:1"><span>קו רוחב</span><input type="number" step="0.0001" id="setLat"></label>
+            <label class="field" style="flex:1"><span>קו אורך</span><input type="number" step="0.0001" id="setLon"></label>
+          </div>
+          <label class="field"><span>דקות הדלקת נרות לפני השקיעה</span><input type="number" id="setCandle" min="0" max="120"></label>
+          <label class="field"><span>שיטת צאת שבת</span>
+            <select id="setHavMode" onchange="App.havModeChanged()">
+              <option value="minutes">דקות אחרי השקיעה</option>
+              <option value="degrees">מעלות מתחת לאופק</option>
+            </select>
+          </label>
+          <label class="field" id="havMinutesBox"><span>דקות אחרי השקיעה</span><input type="number" id="setHavMin" min="0" max="120"></label>
+          <label class="field" id="havDegreesBox" hidden><span>מעלות (לדוגמה 8.5)</span><input type="number" step="0.1" id="setHavDeg" min="0" max="30"></label>
+          <button class="btn primary wide" onclick="App.saveSettings()">💾 שמירת הגדרות מיקום</button>
+        </div>
+
+        <div class="card">
+          <h2>🔊 שמע והפעלה</h2>
+          <label class="field"><span>עוצמת שמע — <b id="volLabel">90%</b></span>
+            <input type="range" id="setVolume" min="0" max="100" oninput="document.getElementById('volLabel').textContent=this.value+'%'">
+          </label>
+          <div class="toggle">
+            <div class="txt"><b>הפעלה אוטומטית עם הדלקת המחשב</b><small>המערכת תעלה לבד בכל כניסה למחשב</small></div>
+            <div class="switch" id="swAutostart" onclick="App.toggleAutostart()"></div>
+          </div>
+          <div class="toggle">
+            <div class="txt"><b>לפתוח ממוזער למגש המערכת</b><small>בלי לפתוח חלון בכל הפעלה</small></div>
+            <div class="switch" id="swMinimized" onclick="App.toggleSwitch('swMinimized','startMinimized')"></div>
+          </div>
+          <div class="toggle">
+            <div class="txt"><b>המערכת פועלת</b><small>כיבוי מוחלט של מנוע הצלצולים</small></div>
+            <div class="switch" id="swPower" onclick="App.togglePower()"></div>
+          </div>
+          <button class="btn wide" style="margin-top:10px" onclick="App.testSound()">▶️ בדיקת שמע</button>
+        </div>
+
+        <div class="card">
+          <h2>💾 גיבוי ושחזור</h2>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:14px">הגיבוי כולל את כל הצלצולים, ההגדרות, ההשבתות וקבצי הצליל שהועלו.</p>
+          <button class="btn primary wide" onclick="App.backup()">⬇️ ייצוא גיבוי</button>
+          <input type="file" id="restoreFile" accept=".zip,.json" hidden onchange="App.restore(event)">
+          <button class="btn wide" style="margin-top:10px" onclick="document.getElementById('restoreFile').click()">⬆️ שחזור מגיבוי</button>
+          <p style="color:var(--muted);font-size:12px;margin-top:12px">תיקיית הנתונים: <code id="dataDir"></code></p>
+        </div>
+
+        <div class="card">
+          <h2>🔐 הרשאות מנהל</h2>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:14px">עם קוד מנהל, משתמש רגיל יוכל רק לצפות בלוח ולהפעיל צלצול ידני.</p>
+          <label class="field"><span>קוד מנהל חדש (4–10 ספרות)</span><input type="password" id="setPin" inputmode="numeric" placeholder="השאירו ריק כדי לבטל נעילה"></label>
+          <button class="btn primary wide" onclick="App.savePin()">💾 שמירת קוד</button>
+          <div id="pinState" style="margin-top:12px;font-size:13px;color:var(--muted)"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>📜 יומן פעילות</h2>
+        <div class="scroll" id="logList"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============ מסך מלא ============ -->
+<div id="kiosk">
+  <button class="k-exit" onclick="App.toggleKiosk()">✕ יציאה</button>
+  <div class="k-clock" id="kClock">--:--</div>
+  <div class="k-date" id="kDate"></div>
+  <div class="k-status" id="kStatus"></div>
+  <div class="k-next" id="kNext"></div>
+</div>
+
+<!-- ============ מודאל צלצול ============ -->
+<div class="modal" id="bellModal">
+  <div class="box">
+    <h2>🔔 <span id="bellModalTitle">הוספת צלצול</span><button class="close" onclick="App.closeModal('bellModal')">✕</button></h2>
+    <form id="bellForm" onsubmit="App.saveBell(event)">
+      <input type="hidden" id="bellId">
+      <div class="row">
+        <label class="field" style="flex:1"><span>שעה</span><input type="time" id="bellTime" required></label>
+        <label class="field" style="flex:1"><span>משך בשניות</span><input type="number" id="bellDuration" min="1" max="120" value="5"></label>
+      </div>
+      <label class="field"><span>שם הצלצול</span><input type="text" id="bellLabel" placeholder="תחילת שיעור / הפסקה…" maxlength="60"></label>
+      <label class="field"><span>צליל</span>
+        <div class="row">
+          <select id="bellSound" style="flex:1"></select>
+          <button type="button" class="btn" onclick="App.previewSelected()">▶️</button>
+        </div>
+      </label>
+      <label class="field"><span>ימים פעילים</span></label>
+      <div class="days" id="bellDays"></div>
+      <div class="toggle" style="margin-top:16px">
+        <div class="txt"><b>הצלצול פעיל</b></div>
+        <div class="switch on" id="bellEnabled" onclick="this.classList.toggle('on')"></div>
+      </div>
+      <div class="row end" style="margin-top:18px">
+        <button type="button" class="btn ghost" onclick="App.closeModal('bellModal')">ביטול</button>
+        <button type="submit" class="btn primary">💾 שמירה</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============ מודאל השבתה ============ -->
+<div class="modal" id="excModal">
+  <div class="box">
+    <h2>📌 <span id="excModalTitle">הוספת השבתה</span><button class="close" onclick="App.closeModal('excModal')">✕</button></h2>
+    <form id="excForm" onsubmit="App.saveException(event)">
+      <input type="hidden" id="excId">
+      <label class="field"><span>שם</span><input type="text" id="excName" required placeholder="חופשת פסח / יום עיון" maxlength="60"></label>
+      <label class="field"><span>סוג תאריך</span>
+        <select id="excType" onchange="App.excTypeChanged()">
+          <option value="gregorian">תאריך לועזי (חד פעמי)</option>
+          <option value="hebrew">תאריך עברי (חוזר כל שנה)</option>
+        </select>
+      </label>
+      <div id="excGreg">
+        <div class="row">
+          <label class="field" style="flex:1"><span>מתאריך</span><input type="date" id="excFrom"></label>
+          <label class="field" style="flex:1"><span>עד תאריך</span><input type="date" id="excTo"></label>
+        </div>
+      </div>
+      <div id="excHeb" hidden>
+        <div class="row">
+          <label class="field" style="flex:1"><span>מיום</span><input type="number" id="excFromDay" min="1" max="30" value="1"></label>
+          <label class="field" style="flex:2"><span>בחודש</span><select id="excFromMonth"></select></label>
+        </div>
+        <div class="row">
+          <label class="field" style="flex:1"><span>עד יום</span><input type="number" id="excToDay" min="1" max="30" value="1"></label>
+          <label class="field" style="flex:2"><span>בחודש</span><select id="excToMonth"></select></label>
+        </div>
+      </div>
+      <div class="row end" style="margin-top:18px">
+        <button type="button" class="btn ghost" onclick="App.closeModal('excModal')">ביטול</button>
+        <button type="submit" class="btn primary">💾 שמירה</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============ מודאל צלצול ידני ============ -->
+<div class="modal" id="manualModal">
+  <div class="box">
+    <h2>🔔 הפעלת צלצול עכשיו<button class="close" onclick="App.closeModal('manualModal')">✕</button></h2>
+    <label class="field"><span>בחרו צליל</span><select id="manualSound"></select></label>
+    <label class="field"><span>משך בשניות</span><input type="number" id="manualDuration" min="1" max="120" value="5"></label>
+    <div class="row end">
+      <button class="btn ghost" onclick="App.closeModal('manualModal')">ביטול</button>
+      <button class="btn primary" onclick="App.ringNow()">🔔 צלצל</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ מודאל כניסת מנהל ============ -->
+<div class="modal" id="loginModal">
+  <div class="box" style="max-width:380px">
+    <h2>🔐 כניסת מנהל</h2>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">נדרש קוד מנהל כדי לשנות את הגדרות המערכת.</p>
+    <form onsubmit="App.login(event)">
+      <label class="field"><span>קוד</span><input type="password" id="loginPin" inputmode="numeric" required autofocus></label>
+      <div class="row end">
+        <button type="button" class="btn ghost" onclick="App.closeModal('loginModal')">ביטול</button>
+        <button type="submit" class="btn primary">כניסה</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
