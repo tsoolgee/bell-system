@@ -53,6 +53,10 @@ class Tray:
         self.on_quit = on_quit
         self.icon = None
         self._kind = None
+        # רק יציאה שהמשתמש ביקש נחשבת לגיטימית. אם לולאת המגש מסתיימת
+        # מסיבה אחרת, המערכת מרימה אותה מחדש במקום להיעלם.
+        self.quit_requested = False
+        self._registered = False
 
     def _status_text(self):
         state = engine.status()
@@ -74,8 +78,13 @@ class Tray:
             pystray.MenuItem("ביטול השתקה" if muted else "השתקת צלצולים", self._toggle_mute),
             pystray.MenuItem("הפעלת המערכת" if not enabled else "כיבוי המערכת", self._toggle_power),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("יציאה", lambda: self.on_quit()),
+            pystray.MenuItem("יציאה", self._quit),
         )
+
+    def _quit(self):
+        self.quit_requested = True
+        if self.on_quit:
+            self.on_quit()
 
     def _toggle_mute(self):
         st = config.settings()
@@ -120,8 +129,10 @@ class Tray:
         self._kind = _kind(engine.status())
         self.icon = pystray.Icon("BellSystem", make_icon(self._kind),
                                  "מערכת צלצולים", self._menu())
-        engine.add_listener(self.update)
-        threading.Thread(target=self._watcher, daemon=True).start()
+        if not self._registered:
+            engine.add_listener(self.update)
+            threading.Thread(target=self._watcher, daemon=True).start()
+            self._registered = True
         self.icon.run()
         return True
 

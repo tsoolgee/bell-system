@@ -28,6 +28,7 @@ jobs:
           python tests/t_engine.py
           python tests/t_audio.py
           python tests/t_tts.py
+          python tests/t_tray_restart.py
 
       - name: Build EXE
         run: python build.py

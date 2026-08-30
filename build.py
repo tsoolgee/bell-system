@@ -47,6 +47,10 @@ def main():
     if result.returncode:
         return result.returncode
     exe = os.path.join(ROOT, "dist", NAME + ".exe")
+    # ההוראות נוסעות יחד עם ה-EXE בחבילה שמוסרים למוסד
+    doc = "הוראות הפעלה.txt"
+    if os.path.exists(os.path.join(ROOT, doc)):
+        shutil.copy2(os.path.join(ROOT, doc), os.path.join(ROOT, "dist", doc))
     print("\nנבנה: %s (%.1f MB)" % (exe, os.path.getsize(exe) / 1e6))
     return 0
 

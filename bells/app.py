@@ -3,6 +3,7 @@
 
 import argparse
 import ctypes
+import hashlib
 import os
 import shutil
 import subprocess
@@ -13,16 +14,25 @@ import webbrowser
 
 from . import config, engine, server, sounds, tray
 
-MUTEX_NAME = "Global\\BellSystemSingleInstance"
 _mutex = None
 
 
+def _mutex_name():
+    """הנעילה היא על תצורה, לא על המחשב.
+
+    שני מופעים שחולקים את אותה תיקיית נתונים ייאבקו על אותו config ואותם
+    צלצולים. מופע שמצביע על תיקייה אחרת הוא התקנה נפרדת ולגיטימית.
+    """
+    digest = hashlib.sha256(config.data_dir().lower().encode("utf-8")).hexdigest()[:16]
+    return "Global\\BellSystemSingleInstance_" + digest
+
+
 def already_running():
-    """נעילת מופע יחיד - שתי מערכות צלצולים לא יכולות לרוץ יחד."""
+    """נעילת מופע יחיד לכל תיקיית נתונים."""
     global _mutex
     if sys.platform != "win32":
         return False
-    _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, MUTEX_NAME)
+    _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, _mutex_name())
     return ctypes.windll.kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
 
 
@@ -100,9 +110,25 @@ def main(argv=None):
     else:
         icon = tray.Tray(port, lambda: open_ui(port), None)
         icon.on_quit = icon.stop
-        if not icon.run():
-            print("pystray לא מותקן - רץ בלי מגש מערכת. Ctrl+C ליציאה.")
-            open_ui(port)
+        # מערכת צלצולים לא אמורה להיעלם בשקט. אם לולאת המגש הסתיימה בלי
+        # שהמשתמש ביקש לצאת, מרימים אותה מחדש - הצלצולים חשובים יותר
+        # מהאייקון, והמנוע והשרת ממשיכים לרוץ בינתיים בכל מקרה.
+        for attempt in range(1, 6):
+            if not icon.run():
+                print("pystray לא מותקן - רץ בלי מגש מערכת. Ctrl+C ליציאה.")
+                open_ui(port)
+                try:
+                    while True:
+                        time.sleep(3600)
+                except KeyboardInterrupt:
+                    pass
+                break
+            if icon.quit_requested:
+                break
+            engine.log("מגש המערכת נסגר מעצמו - מרים מחדש (ניסיון %d)" % attempt, "error")
+            time.sleep(2)
+        else:
+            engine.log("מגש המערכת נסגר שוב ושוב - ממשיך בלי אייקון", "error")
             try:
                 while True:
                     time.sleep(3600)

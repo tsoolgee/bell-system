@@ -78,8 +78,7 @@ def _pygame():
         return None
 
 
-def available_devices():
-    """שמות התקני הפלט. רשימה ריקה = אי אפשר לבחור התקן."""
+def _enumerate_devices():
     pygame = _pygame()
     if pygame is None:
         return []
@@ -95,6 +94,11 @@ def available_devices():
         return names
     except Exception:
         return []
+
+
+def available_devices():
+    """שמות התקני הפלט. רשימה ריקה = אי אפשר לבחור התקן."""
+    return _on_worker(_enumerate_devices) or []
 
 
 def _mixer_ready(device):
@@ -141,8 +145,7 @@ def current_backend():
         return "mci"
 
 
-def can_choose_device(name):
-    """האם ניתן באמת לפתוח את ההתקן הזה. חלק מההתקנים ברשימה נכשלים."""
+def _probe_device(name):
     pygame = _pygame()
     if pygame is None or not name:
         return False
@@ -159,6 +162,11 @@ def can_choose_device(name):
             return True
         except Exception:
             return False
+
+
+def can_choose_device(name):
+    """האם ניתן באמת לפתוח את ההתקן הזה. חלק מההתקנים ברשימה נכשלים."""
+    return bool(_on_worker(lambda: _probe_device(name)))
 
 
 def device_fell_back():
@@ -247,7 +255,14 @@ def _loop():
             command = None
         if command:
             action = command[0]
-            if action == "stop":
+            if action == "call":
+                _, fn, done, out = command
+                try:
+                    out.append(fn())
+                except Exception:
+                    out.append(None)
+                done.set()
+            elif action == "stop":
                 current = _close(current)
             elif action == "play":
                 _, path, duration, volume, device, done, result = command
@@ -268,6 +283,21 @@ def _ensure_worker():
         if _worker is None or not _worker.is_alive():
             _worker = threading.Thread(target=_loop, name="bell-audio", daemon=True)
             _worker.start()
+
+
+def _on_worker(fn, timeout=25):
+    """מריץ פעולת SDL על תהליכון השמע.
+
+    חובה: אתחול/כיבוי של מיקסר SDL מתהליכון אחר שולח WM_QUIT לתור ההודעות
+    של התהליכון הראשי, ולולאת המגש מסתיימת - האפליקציה יוצאת בשקט באמצע
+    יום לימודים. כל נגיעה ב-SDL חייבת לקרות כאן.
+    """
+    _ensure_worker()
+    done, out = threading.Event(), []
+    _commands.put(("call", fn, done, out))
+    if not done.wait(timeout):
+        return None
+    return out[0] if out else None
 
 
 def stop():

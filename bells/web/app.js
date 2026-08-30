@@ -821,17 +821,22 @@ const App = {
       return;
     }
     const pinned = !!info.selected;
-    const problem = (!pinned && info.virtual) || info.muted || info.volume < 20 || info.fellBack;
+    // התקן וירטואלי הוא לגיטימי לגמרי - למשל מחשב שנשלט מרחוק, שבו הצליל
+    // נשלח למאזין ולא לחדר. מתריעים רק על מה שבאמת שובר את הצלצול.
+    const problem = info.muted || info.fellBack || info.volume === 0;
     let detail = "עוצמת ההתקן " + info.volume + "%";
     if (info.muted) detail += " · מושתק";
     let extra = "";
     if (info.fellBack) {
       extra = "<br><b>ההתקן שנבחר אינו זמין כרגע</b>, ולכן הצלצולים יוצאים לברירת המחדל.";
+    } else if (info.muted || info.volume === 0) {
+      extra = "<br>ההתקן " + (info.muted ? "מושתק" : "בעוצמה 0") +
+        " — שום צליל לא יישמע ממנו. פתחו את עוצמתו במיקסר של Windows.";
     } else if (pinned) {
       extra = "<br>הצלצולים מנותבים לכאן במפורש — שינוי התקן ברירת המחדל של Windows לא ישפיע עליהם.";
     } else if (info.virtual) {
-      extra = "<br><b>זהו התקן וירטואלי, לא רמקולים.</b> אף אחד לא ישמע את הצלצולים. " +
-        "בחרו למעלה את הרמקולים, או שנו את ברירת המחדל של Windows.";
+      extra = "<br>זהו התקן וירטואלי (כבל שמע להעברה או להאזנה מרחוק). אם זו הכוונה — הכול תקין. " +
+        "אם רצו רמקולים בכיתות, אפשר לבחור אותם למעלה בלי לשנות את ברירת המחדל של Windows.";
     }
     box.innerHTML = '<div class="notice ' + (problem ? "warn" : "info") + '">' +
       (problem ? "⚠️ " : "🔈 ") + "הצליל יוצא אל <b>" + this.esc(info.name) + "</b><br>" +
@@ -874,7 +879,7 @@ const App = {
           result.innerHTML = '<div class="notice info" style="margin-top:12px">' +
             "✅ נמדד פלט שמע" + where + " (שיא " + res.peak + ", עוצמת ההתקן " +
             dev.volume + "%)." + fellBack +
-            " אם לא שמעתם — בדקו את הרמקולים עצמם ואת החיבור.</div>";
+            " אם לא שמעתם — הבעיה היא במה שמחובר להתקן הזה, לא במערכת.</div>";
         } else if (res.heard === false) {
           result.innerHTML = '<div class="notice warn" style="margin-top:12px">' +
             "❌ לא נמדד שום פלט שמע" + where + ". הצלצול הופעל אבל שום צליל לא הגיע להתקן." +
