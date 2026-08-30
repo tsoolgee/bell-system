@@ -1,3 +1,4 @@
 pyluach>=2.2
 pystray>=0.19
 Pillow>=9.0
+pycaw>=20240210

@@ -92,6 +92,7 @@ const App = {
     this.renderShabbatSettings();
     this.fillSettings();
     this.loadTts();
+    this.loadAudioDevice();
   },
 
   async refresh() {
@@ -789,8 +790,51 @@ const App = {
     });
   },
 
+  async loadAudioDevice() {
+    let info;
+    try {
+      info = await (await fetch("/api/audio")).json();
+    } catch (err) { return; }
+    const box = document.getElementById("audioDevice");
+    if (!info.available) { box.innerHTML = ""; return; }
+    const problem = info.virtual || info.muted || info.volume < 20;
+    let detail = "עוצמת ההתקן " + info.volume + "%";
+    if (info.muted) detail += " · מושתק";
+    box.innerHTML = '<div class="notice ' + (problem ? "warn" : "info") + '">' +
+      (problem ? "⚠️ " : "🔈 ") + "הצליל יוצא אל <b>" + this.esc(info.name) + "</b><br>" + detail +
+      (info.virtual
+        ? "<br><b>זהו התקן וירטואלי, לא רמקולים.</b> אף אחד לא ישמע את הצלצולים. " +
+          "שנו את התקן ברירת המחדל: לחיצה ימנית על סמל הרמקול בשורת המשימות ← " +
+          "„הגדרות צליל“ ← בחירת הרמקולים."
+        : "") +
+      "</div>";
+  },
+
   testSound() {
-    this.guard(() => this.api("/api/ring", { json: { sound: "bell_classic", duration: 3 } }));
+    const button = document.getElementById("audioTestBtn");
+    const result = document.getElementById("audioTestResult");
+    button.classList.add("loading");
+    button.textContent = "⏳ בודק…";
+    result.innerHTML = "";
+    this.guard(async () => {
+      try {
+        const res = await this.api("/api/audio/test", { json: {} });
+        await this.loadAudioDevice();
+        if (res.heard === true) {
+          result.innerHTML = '<div class="notice info" style="margin-top:12px">' +
+            "✅ נמדד פלט שמע (שיא " + res.peak + "). אם לא שמעתם — בדקו את עוצמת הרמקולים עצמם.</div>";
+        } else if (res.heard === false) {
+          result.innerHTML = '<div class="notice warn" style="margin-top:12px">' +
+            "❌ לא נמדד שום פלט שמע. הצלצול הופעל אבל שום צליל לא הגיע להתקן.</div>";
+        } else {
+          result.innerHTML = '<div class="notice info" style="margin-top:12px">' +
+            (res.started ? "הצלצול הופעל." : "❌ הפעלת הצלצול נכשלה.") + "</div>";
+        }
+      } finally {
+        button.classList.remove("loading");
+        button.textContent = "▶️ בדיקת שמע";
+      }
+    });
   },
 
   openManual() {

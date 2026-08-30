@@ -16,7 +16,7 @@ import urllib.parse
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import audio, autostart, config, engine, jewcal, schedule, tts
+from . import audio, autostart, config, engine, jewcal, outdev, schedule, tts
 
 MAX_UPLOAD = 25 * 1024 * 1024
 ALLOWED_AUDIO = {".mp3", ".wav", ".m4a", ".ogg", ".wma", ".aac"}
@@ -73,11 +73,20 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, message, code=400):
         self._json({"ok": False, "error": message}, code)
 
-    def _body(self):
+    def _read_body(self):
+        """נקרא פעם אחת לכל POST, לפני הניתוב.
+
+        חובה לרוקן את הגוף גם עבור נתיבים שלא צריכים אותו: בחיבור
+        keep-alive בייטים שלא נקראו נדבקים לתחילת הבקשה הבאה, והשרת
+        מקבל שורת בקשה מעוותת כמו "{}GET /api/state".
+        """
         length = int(self.headers.get("Content-Length") or 0)
         if length > MAX_UPLOAD:
             raise ValueError("file too large")
         return self.rfile.read(length) if length else b""
+
+    def _body(self):
+        return getattr(self, "_raw_body", b"")
 
     def _payload(self):
         raw = self._body()
@@ -109,6 +118,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
+        try:
+            self._raw_body = self._read_body()
+        except ValueError:
+            self.close_connection = True  # הגוף לא רוקן, החיבור כבר לא אמין
+            return self._error("הקובץ גדול מדי", 413)
         try:
             return self._api_post(path, query)
         except Exception as exc:
@@ -177,6 +191,8 @@ class Handler(BaseHTTPRequestHandler):
                 "geminiVoices": [{"id": v, "name": n} for v, n in tts.GEMINI_VOICES],
                 "sapiVoices": tts.sapi_voices(),
             })
+        if path == "/api/audio":
+            return self._json(outdev.info())
         if path == "/api/backup":
             return self._backup()
         return self._error("לא נמצא", 404)
@@ -248,6 +264,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/stop":
             audio.stop()
             return self._json({"ok": True})
+        if path == "/api/audio/test":
+            return self._audio_test()
 
         if not self._authorized():
             return self._error("נדרשת כניסת מנהל", 403)
@@ -475,6 +493,18 @@ class Handler(BaseHTTPRequestHandler):
         cfg["sounds"] = [s for s in cfg["sounds"] if s["id"] != data.get("id")]
         config.save()
         return self._json({"ok": True})
+
+    def _audio_test(self):
+        """בדיקת שמע אמיתית: מנגנת ומודדת את הפלט בפועל."""
+        device = outdev.info()
+        started = engine.ring("bell_classic", 3, "בדיקת שמע", manual=True)
+        peak = outdev.measure(2.5)
+        audio.stop()
+        result = {"ok": True, "started": started, "device": device}
+        if peak is not None:
+            result["peak"] = round(peak, 3)
+            result["heard"] = peak > 0.02
+        return self._json(result)
 
     def _set_tts_key(self, data):
         config.settings()["ttsApiKey"] = str(data.get("key") or "").strip()

@@ -176,7 +176,9 @@
             <div class="txt"><b>המערכת פועלת</b><small>כיבוי מוחלט של מנוע הצלצולים</small></div>
             <div class="switch" id="swPower" onclick="App.togglePower()"></div>
           </div>
-          <button class="btn wide" style="margin-top:10px" onclick="App.testSound()">▶️ בדיקת שמע</button>
+          <div id="audioDevice" style="margin-top:14px"></div>
+          <button class="btn wide" id="audioTestBtn" onclick="App.testSound()">▶️ בדיקת שמע</button>
+          <div id="audioTestResult"></div>
         </div>
 
         <div class="card">
