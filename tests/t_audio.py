@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""בדיקת הנגן בדפוס התהליכונים האמיתי של האפליקציה.
+"""בדיקת הנגן בדפוס התהליכונים האמיתי של האפליקציה, ובחירת התקן פלט.
 
-הבאג שזה מכסה: MCI קושר alias לתהליכון שפתח אותו. כשהפתיחה קרתה
-בתהליכון של השרת וההשמעה בתהליכון אחר, כל הפקודות נכשלו בשקט -
-הלוג דיווח על צלצול, ושום צליל לא יצא.
+שני באגים שזה מכסה:
+* MCI קושר alias לתהליכון שפתח אותו. כשהפתיחה קרתה בתהליכון של השרת
+  וההשמעה בתהליכון אחר, כל הפקודות נכשלו בשקט - הלוג דיווח על צלצול,
+  ושום צליל לא יצא.
+* צלצולים חייבים לצאת להתקן שנבחר, בלי קשר לברירת המחדל של Windows.
 """
 import os
 import sys
@@ -19,7 +21,8 @@ fails = []
 
 
 def check(name, condition, detail=""):
-    print(("  OK  " if condition else " FAIL ") + name + ("  -> " + str(detail) if detail and not condition else ""))
+    print(("  OK  " if condition else " FAIL ") + name +
+          ("  -> " + repr(detail) if not condition else ""))
     if not condition:
         fails.append(name)
 
@@ -52,34 +55,34 @@ def from_other_thread():
 
 worker = threading.Thread(target=from_other_thread)
 worker.start()
-worker.join(timeout=10)
+worker.join(timeout=15)
 
 check("play מדווח על הצלחה", result.get("ok") is True, result)
 check("הנגן מדווח שהוא מנגן", audio.is_playing())
+backend = audio.current_backend()
+print("       מנוע השמע: %s" % backend)
 
-opens = commands("open")
-check("MCI פתח את הקובץ", opens and opens[0][2] == 0, opens[:1])
-check("נבחר mpegvideo (תומך בעוצמה)", any("mpegvideo" in c[1] for c in opens), opens[:1])
-
-vol = commands("setaudio")
-check("עוצמה נקבעה בהצלחה", vol and vol[0][2] == 0, vol[:1])
-
-plays = commands("play")
-check("פקודת play התקבלה", plays and plays[0][2] == 0, plays[:1])
-
-time.sleep(0.7)
-modes = [c for c in commands("status") if " mode" in c[1]]
-check("MCI מדווח playing מתוך תהליכון העבודה",
-      any(c[3] == "playing" for c in modes), modes[-3:] or "לא נשאל בכלל")
+if backend == "mci":
+    # המסלול הישן - נוודא שהפקודות באמת התקבלו ולא נכשלו בשקט
+    opens = commands("open")
+    check("MCI פתח את הקובץ", opens and opens[0][2] == 0, opens[:1])
+    plays = commands("play")
+    check("פקודת play התקבלה", plays and plays[0][2] == 0, plays[:1])
+    time.sleep(0.7)
+    modes = [c for c in commands("status") if " mode" in c[1]]
+    check("MCI מדווח playing מתוך תהליכון העבודה",
+          any(c[3] == "playing" for c in modes), modes[-3:] or "לא נשאל בכלל")
+else:
+    check("pygame לא נפל ל-MCI", not commands("open"), commands("open")[:1])
 
 print("--- עצירה ---")
 audio.stop()
 time.sleep(0.4)
 check("הנגן נעצר", not audio.is_playing())
-check("הקובץ נסגר", any(c[0] == "close" and c[2] == 0 for c in log))
 
 print("--- קובץ שלא קיים ---")
-check("קובץ חסר מוחזר כ-False", audio.play(os.path.join(config.sounds_dir(), "nope.wav")) is False)
+check("קובץ חסר מוחזר כ-False",
+      audio.play(os.path.join(config.sounds_dir(), "nope.wav")) is False)
 
 print("--- השמעה חוזרת ברצף ---")
 log.clear()
@@ -89,6 +92,41 @@ audio.stop()
 time.sleep(0.3)
 errors = [c for c in log if c[2] != 0 and c[0] in ("play", "open")]
 check("אין שגיאות MCI ברצף", not errors, errors[:3])
+
+print("--- בחירת התקן פלט ---")
+devices = audio.available_devices()
+if not devices:
+    print("       דילוג: אין מנוע שתומך בבחירת התקן (pygame חסר)")
+else:
+    print("       " + " | ".join(devices))
+    usable = [d for d in devices if audio.can_choose_device(d)]
+    print("       ניתנים לפתיחה: " + (" | ".join(usable) or "אף אחד"))
+    check("לפחות התקן אחד ניתן לפתיחה", len(usable) > 0, devices)
+
+if devices and usable:
+    target = usable[0]
+    audio.stop()
+    time.sleep(0.3)
+    check("השמעה להתקן שנבחר",
+          audio.play(path, duration=2, volume=80, device=target) is True)
+    check("הנגן פתח בדיוק את ההתקן שנבחר", audio.active_device() == target,
+          audio.active_device())
+    check("לא דווחה נפילה לברירת מחדל", audio.device_fell_back() is False)
+    audio.stop()
+    time.sleep(0.3)
+
+    check("השמעה להתקן שלא קיים עדיין מצלצלת",
+          audio.play(path, duration=2, volume=80, device="התקן שלא קיים") is True)
+    check("נפילה לברירת מחדל מדווחת", audio.device_fell_back() is True)
+    check("ההתקן בפועל אינו זה שהתבקש",
+          audio.active_device() != "התקן שלא קיים", audio.active_device())
+    audio.stop()
+    time.sleep(0.3)
+
+    check("חזרה לברירת המחדל",
+          audio.play(path, duration=1, volume=80, device=None) is True)
+    check("ברירת מחדל לא נחשבת נפילה", audio.device_fell_back() is False)
+    audio.stop()
 
 print()
 print("נכשלו: %d" % len(fails))

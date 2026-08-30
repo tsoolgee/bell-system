@@ -192,7 +192,14 @@ class Handler(BaseHTTPRequestHandler):
                 "sapiVoices": tts.sapi_voices(),
             })
         if path == "/api/audio":
-            return self._json(outdev.info())
+            st = config.settings()
+            chosen = st.get("outputDevice") or ""
+            data = outdev.info(chosen or None)
+            data["devices"] = audio.available_devices()
+            data["selected"] = chosen
+            data["canChoose"] = bool(data["devices"])
+            data["fellBack"] = audio.device_fell_back()
+            return self._json(data)
         if path == "/api/backup":
             return self._backup()
         return self._error("לא נמצא", 404)
@@ -298,7 +305,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _set_settings(self, data):
         st = config.settings()
-        allowed = {"volume", "city", "lat", "lon", "candleMinutes", "havdalahMode",
+        allowed = {"volume", "outputDevice", "city", "lat", "lon", "candleMinutes", "havdalahMode",
                    "havdalahMinutes", "havdalahDegrees", "shabbatEnabled", "holidaysAuto",
                    "israel", "erevChagStop", "startMinimized",
                    "ttsProvider", "ttsVoice", "ttsSapiVoice", "ttsRate"}
@@ -495,12 +502,17 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"ok": True})
 
     def _audio_test(self):
-        """בדיקת שמע אמיתית: מנגנת ומודדת את הפלט בפועל."""
-        device = outdev.info()
+        """בדיקת שמע אמיתית: מנגנת ומודדת את נקודת הקצה שאליה מנגנים."""
+        chosen = config.settings().get("outputDevice") or ""
         started = engine.ring("bell_classic", 3, "בדיקת שמע", manual=True)
-        peak = outdev.measure(2.5)
+        # נמדוד את ההתקן שהנגן באמת פתח, לא את זה שביקשנו
+        actual = audio.active_device() or ""
+        peak = outdev.measure(2.5, actual or None)
         audio.stop()
-        result = {"ok": True, "started": started, "device": device}
+        device = outdev.info(actual or None)
+        result = {"ok": True, "started": started, "device": device,
+                  "requested": chosen, "actual": actual,
+                  "fellBack": audio.device_fell_back()}
         if peak is not None:
             result["peak"] = round(peak, 3)
             result["heard"] = peak > 0.02

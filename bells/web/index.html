@@ -161,6 +161,9 @@
 
         <div class="card">
           <h2>🔊 שמע והפעלה</h2>
+          <label class="field" id="outputDeviceField"><span>התקן הפלט לצלצולים</span>
+            <select id="setOutput" onchange="App.saveOutputDevice()"></select>
+          </label>
           <label class="field"><span>עוצמת שמע — <b id="volLabel">90%</b></span>
             <input type="range" id="setVolume" min="0" max="100" oninput="document.getElementById('volLabel').textContent=this.value+'%'">
           </label>

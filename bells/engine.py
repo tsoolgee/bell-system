@@ -74,9 +74,10 @@ def all_sounds():
 
 def ring(sound_id, duration=5, label="", manual=False):
     """השמעת צלצול בפועל."""
+    st = config.settings()
     path = sound_path(sound_id) or sound_path("bell_classic")
-    volume = config.settings().get("volume", 90)
-    ok = audio.play(path, duration=duration, volume=volume)
+    ok = audio.play(path, duration=duration, volume=st.get("volume", 90),
+                    device=st.get("outputDevice") or None)
     log(("צלצול ידני: " if manual else "צלצול: ") + (label or sound_name(sound_id)),
         "ring" if ok else "error")
     _notify()

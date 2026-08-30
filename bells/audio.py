@@ -1,9 +1,15 @@
 # -*- coding: utf-8 -*-
-"""נגן שמע מבוסס Windows MCI - תומך ב-MP3/WAV/M4A ללא ספריות חיצוניות.
+"""נגן השמע של המערכת.
 
-חשוב: MCI קושר כל alias לתהליכון שפתח אותו. פקודה שנשלחת מתהליכון אחר
-נכשלת בשקט - הקובץ נפתח, אבל שום צליל לא יוצא. לכן *כל* פקודות MCI
-רצות כאן בתהליכון עבודה יחיד, וכל השאר רק שולח אליו בקשות.
+שני מנועים:
+
+* pygame/SDL - המנוע המועדף. הוא היחיד שמאפשר לנגן להתקן פלט *מסוים*,
+  בלי קשר לברירת המחדל של Windows. בבית ספר זה קריטי: הצלצולים הולכים
+  לרמקולי הכיתות גם אם המחשב עצמו מנגן לאוזניות.
+* MCI (winmm) - גיבוי כשאין pygame. מנגן רק להתקן ברירת המחדל.
+
+חשוב בשני המקרים: MCI קושר alias לתהליכון שפתח אותו, ופקודה מתהליכון
+אחר נכשלת בשקט. לכן *כל* עבודת השמע רצה כאן בתהליכון עבודה יחיד.
 """
 
 import ctypes
@@ -14,17 +20,27 @@ import sys
 import threading
 import time
 
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+
 _counter = itertools.count(1)
 _commands = queue.Queue()
 _worker = None
 _worker_lock = threading.Lock()
+# המיקסר גלובלי ב-pygame: אתחול מתהליכון אחד בזמן השמעה באחר שובר אותו
+_mixer_lock = threading.RLock()
 _playing = threading.Event()
+
+# ההתקן שהמיקסר מאותחל אליו בפועל (None = ברירת המחדל של Windows)
+_active_device = None
+_wanted_device = None
 
 if sys.platform == "win32":
     _mci = ctypes.windll.winmm.mciSendStringW
-else:  # פיתוח מחוץ לווינדוס - הנגן פשוט לא עושה כלום
+else:
     _mci = None
 
+
+# ---------------------------------------------------------------- MCI
 
 def _send(command):
     if _mci is None:
@@ -34,13 +50,8 @@ def _send(command):
     return err, buf.value
 
 
-def _open(path):
-    """פותח את הקובץ ומחזיר (alias, האם ניתן לשלוט בעוצמה).
-
-    mpegvideo (DirectShow) קודם בכוונה: הוא היחיד שתומך ב-setaudio volume,
-    וגם קורא WAV, MP3 ו-M4A. waveaudio נשאר כגיבוי.
-    חובה לקרוא לזה מתוך תהליכון העבודה.
-    """
+def _mci_open(path):
+    """מחזיר (alias, האם ניתן לשלוט בעוצמה). חובה לקרוא מתהליכון העבודה."""
     alias = "bell%d" % next(_counter)
     for kind in ("mpegvideo", None, "waveaudio"):
         cmd = ('open "%s" alias %s' % (path, alias) if kind is None
@@ -50,37 +61,154 @@ def _open(path):
     return None, False
 
 
-def _length_ms(alias):
+def _mci_length(alias):
     try:
         return int(_send("status %s length" % alias)[1])
     except (TypeError, ValueError):
         return 0
 
 
-def _is_done(alias):
-    return _send("status %s mode" % alias)[1] != "playing"
+# ---------------------------------------------------------------- pygame
 
+def _pygame():
+    try:
+        import pygame
+        return pygame
+    except Exception:
+        return None
+
+
+def available_devices():
+    """שמות התקני הפלט. רשימה ריקה = אי אפשר לבחור התקן."""
+    pygame = _pygame()
+    if pygame is None:
+        return []
+    try:
+        import pygame._sdl2.audio as sdl2_audio
+        with _mixer_lock:
+            opened = pygame.mixer.get_init()
+            if not opened:
+                pygame.mixer.init()
+            names = list(sdl2_audio.get_audio_device_names(False))
+            if not opened:
+                pygame.mixer.quit()
+        return names
+    except Exception:
+        return []
+
+
+def _mixer_ready(device):
+    """מאתחל את המיקסר להתקן המבוקש. מחזיר True אם יש מיקסר פעיל."""
+    global _active_device
+    pygame = _pygame()
+    if pygame is None:
+        return False
+    with _mixer_lock:
+        if pygame.mixer.get_init() and _active_device == device:
+            return True
+        try:
+            pygame.mixer.quit()
+        except Exception:
+            pass
+        # אם ההתקן שנבחר נעלם (נותק, שונה שמו) - עדיין מצלצלים, בברירת המחדל
+        for candidate in ([device] if device else []) + [None]:
+            kwargs = {"frequency": 44100, "size": -16, "channels": 2, "buffer": 1024}
+            if candidate:
+                kwargs["devicename"] = candidate
+            try:
+                pygame.mixer.init(**kwargs)
+                _active_device = candidate
+                return True
+            except Exception:
+                continue
+        _active_device = None
+        return False
+
+
+def active_device():
+    """ההתקן שהצלצולים באמת יוצאים אליו כרגע, או None לברירת המחדל."""
+    return _active_device
+
+
+def current_backend():
+    """'pygame' (תומך בבחירת התקן) או 'mci' (ברירת מחדל בלבד)."""
+    pygame = _pygame()
+    if pygame is None:
+        return "mci"
+    try:
+        return "pygame" if pygame.mixer.get_init() else "mci"
+    except Exception:
+        return "mci"
+
+
+def can_choose_device(name):
+    """האם ניתן באמת לפתוח את ההתקן הזה. חלק מההתקנים ברשימה נכשלים."""
+    pygame = _pygame()
+    if pygame is None or not name:
+        return False
+    with _mixer_lock:
+        try:
+            opened = pygame.mixer.get_init()
+            keep = _active_device
+            pygame.mixer.quit()
+            pygame.mixer.init(frequency=44100, size=-16, channels=2,
+                              buffer=1024, devicename=name)
+            pygame.mixer.quit()
+            if opened:
+                _mixer_ready(keep)
+            return True
+        except Exception:
+            return False
+
+
+def device_fell_back():
+    """True אם נבחר התקן אבל בפועל מנגנים למשהו אחר."""
+    return bool(_wanted_device) and _active_device != _wanted_device
+
+
+# ---------------------------------------------------------------- השמעה
 
 class _Playback:
-    __slots__ = ("alias", "deadline", "clip_ends")
+    __slots__ = ("kind", "alias", "sound", "channel", "deadline", "clip_ends")
 
-    def __init__(self, alias, deadline, clip_ends):
-        self.alias = alias
+    def __init__(self, kind, deadline):
+        self.kind = kind
+        self.alias = None
+        self.sound = None
+        self.channel = None
         self.deadline = deadline
-        self.clip_ends = clip_ends
+        self.clip_ends = 0.0
 
 
-def _start(path, duration, volume):
-    alias, can_set_volume = _open(path)
+def _start(path, duration, volume, device):
+    global _wanted_device
+    _wanted_device = device or None
+    deadline = time.time() + max(1, int(duration))
+
+    if _mixer_ready(device or None):
+        pygame = _pygame()
+        try:
+            play = _Playback("pygame", deadline)
+            play.sound = pygame.mixer.Sound(path)
+            play.sound.set_volume(max(0, min(100, int(volume))) / 100.0)
+            # לולאה אינסופית ועצירה בזמן: כך קובץ קצר ממלא את כל המשך
+            play.channel = play.sound.play(loops=-1)
+            _playing.set()
+            return play
+        except Exception:
+            pass  # נופלים ל-MCI
+
+    alias, can_set_volume = _mci_open(path)
     if alias is None:
         return None
     if can_set_volume:
         _send("setaudio %s volume to %d" % (alias, max(0, min(1000, int(volume) * 10))))
-    clip = (_length_ms(alias) / 1000.0) or 1.0
-    now = time.time()
+    play = _Playback("mci", deadline)
+    play.alias = alias
+    play.clip_ends = time.time() + ((_mci_length(alias) / 1000.0) or 1.0)
     _send("play %s from 0" % alias)
     _playing.set()
-    return _Playback(alias, now + max(1, int(duration)), now + clip)
+    return play
 
 
 def _pump(current):
@@ -88,17 +216,24 @@ def _pump(current):
     now = time.time()
     if now >= current.deadline:
         return _close(current)
-    if now >= current.clip_ends or _is_done(current.alias):
-        # הקובץ קצר מהמשך המבוקש - חוזרים עליו עד סוף הזמן
-        _send("play %s from 0" % current.alias)
-        current.clip_ends = now + ((_length_ms(current.alias) / 1000.0) or 1.0)
+    if current.kind == "mci":
+        done = _send("status %s mode" % current.alias)[1] != "playing"
+        if now >= current.clip_ends or done:
+            _send("play %s from 0" % current.alias)
+            current.clip_ends = now + ((_mci_length(current.alias) / 1000.0) or 1.0)
     return current
 
 
 def _close(current):
     if current:
-        _send("stop %s" % current.alias)
-        _send("close %s" % current.alias)
+        if current.kind == "mci":
+            _send("stop %s" % current.alias)
+            _send("close %s" % current.alias)
+        else:
+            try:
+                current.sound.stop()
+            except Exception:
+                pass
     _playing.clear()
     return None
 
@@ -106,9 +241,8 @@ def _close(current):
 def _loop():
     current = None
     while True:
-        timeout = 0.05 if current else 0.5
         try:
-            command = _commands.get(timeout=timeout)
+            command = _commands.get(timeout=0.05 if current else 0.5)
         except queue.Empty:
             command = None
         if command:
@@ -116,9 +250,12 @@ def _loop():
             if action == "stop":
                 current = _close(current)
             elif action == "play":
-                _, path, duration, volume, done, result = command
+                _, path, duration, volume, device, done, result = command
                 current = _close(current)
-                current = _start(path, duration, volume)
+                try:
+                    current = _start(path, duration, volume, device)
+                except Exception:
+                    current = None
                 result.append(current is not None)
                 done.set()
         if current:
@@ -143,8 +280,8 @@ def is_playing():
     return _playing.is_set()
 
 
-def play(path, duration=5, volume=90, on_done=None):
-    """מנגן קובץ למשך duration שניות. אם הקובץ קצר יותר - חוזר עליו.
+def play(path, duration=5, volume=90, device=None, on_done=None):
+    """מנגן קובץ למשך duration שניות אל ההתקן המבוקש.
 
     מחזיר True אם ההשמעה אכן התחילה.
     """
@@ -152,10 +289,10 @@ def play(path, duration=5, volume=90, on_done=None):
         return False
     _ensure_worker()
     done, result = threading.Event(), []
-    _commands.put(("play", path, duration, volume, done, result))
+    _commands.put(("play", path, duration, volume, device, done, result))
     # ממתינים לתשובה אמיתית מתהליכון העבודה, כדי שהיומן לא ידווח על
     # צלצול שלא באמת יצא.
-    if not done.wait(timeout=5):
+    if not done.wait(timeout=10):
         return False
     ok = bool(result and result[0])
     if ok and on_done:

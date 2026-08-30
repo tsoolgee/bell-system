@@ -10,7 +10,8 @@ os.environ["BELLSYSTEM_DATA"] = os.path.join(os.environ["TEMP"], "BellSystemTest
 from bells import audio, config, engine  # noqa: E402
 
 played = []
-audio.play = lambda path, duration=5, volume=90, on_done=None: (played.append(os.path.basename(path)), True)[1]
+audio.play = lambda path, duration=5, volume=90, device=None, on_done=None: (
+    played.append(os.path.basename(path)), True)[1]
 engine.log = lambda *a, **k: None
 
 cfg = config.get()

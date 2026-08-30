@@ -795,19 +795,57 @@ const App = {
     try {
       info = await (await fetch("/api/audio")).json();
     } catch (err) { return; }
+    this.audio = info;
+
+    const field = document.getElementById("outputDeviceField");
+    const select = document.getElementById("setOutput");
+    if (info.canChoose) {
+      field.hidden = false;
+      select.innerHTML = '<option value="">ברירת המחדל של Windows</option>' +
+        (info.devices || []).map(d =>
+          '<option value="' + this.esc(d) + '"' + (d === info.selected ? " selected" : "") + ">" +
+          this.esc(d) + "</option>").join("");
+      if (info.selected && !(info.devices || []).includes(info.selected)) {
+        select.innerHTML += '<option value="' + this.esc(info.selected) + '" selected>' +
+          this.esc(info.selected) + " (לא מחובר)</option>";
+      }
+    } else {
+      field.hidden = true;
+    }
+
     const box = document.getElementById("audioDevice");
-    if (!info.available) { box.innerHTML = ""; return; }
-    const problem = info.virtual || info.muted || info.volume < 20;
+    if (!info.available) {
+      box.innerHTML = info.selected
+        ? '<div class="notice info">הצלצולים מנותבים אל <b>' + this.esc(info.selected) + "</b>.</div>"
+        : "";
+      return;
+    }
+    const pinned = !!info.selected;
+    const problem = (!pinned && info.virtual) || info.muted || info.volume < 20 || info.fellBack;
     let detail = "עוצמת ההתקן " + info.volume + "%";
     if (info.muted) detail += " · מושתק";
+    let extra = "";
+    if (info.fellBack) {
+      extra = "<br><b>ההתקן שנבחר אינו זמין כרגע</b>, ולכן הצלצולים יוצאים לברירת המחדל.";
+    } else if (pinned) {
+      extra = "<br>הצלצולים מנותבים לכאן במפורש — שינוי התקן ברירת המחדל של Windows לא ישפיע עליהם.";
+    } else if (info.virtual) {
+      extra = "<br><b>זהו התקן וירטואלי, לא רמקולים.</b> אף אחד לא ישמע את הצלצולים. " +
+        "בחרו למעלה את הרמקולים, או שנו את ברירת המחדל של Windows.";
+    }
     box.innerHTML = '<div class="notice ' + (problem ? "warn" : "info") + '">' +
-      (problem ? "⚠️ " : "🔈 ") + "הצליל יוצא אל <b>" + this.esc(info.name) + "</b><br>" + detail +
-      (info.virtual
-        ? "<br><b>זהו התקן וירטואלי, לא רמקולים.</b> אף אחד לא ישמע את הצלצולים. " +
-          "שנו את התקן ברירת המחדל: לחיצה ימנית על סמל הרמקול בשורת המשימות ← " +
-          "„הגדרות צליל“ ← בחירת הרמקולים."
-        : "") +
-      "</div>";
+      (problem ? "⚠️ " : "🔈 ") + "הצליל יוצא אל <b>" + this.esc(info.name) + "</b><br>" +
+      detail + extra + "</div>";
+  },
+
+  saveOutputDevice() {
+    const device = document.getElementById("setOutput").value;
+    this.guard(async () => {
+      await this.api("/api/settings", { json: { outputDevice: device } });
+      await this.api("/api/ring", { json: { sound: "bell_classic", duration: 2 } });
+      await this.loadAudioDevice();
+      this.toast(device ? "הצלצולים ינותבו אל " + device : "חזרה לברירת המחדל של Windows");
+    });
   },
 
   testSound() {
@@ -820,12 +858,27 @@ const App = {
       try {
         const res = await this.api("/api/audio/test", { json: {} });
         await this.loadAudioDevice();
-        if (res.heard === true) {
+        const where = res.actual ? " אל <b>" + this.esc(res.actual) + "</b>" : " להתקן ברירת המחדל";
+        const dev = res.device || {};
+        const silenced = dev.muted || dev.volume === 0;
+        const fellBack = res.fellBack
+          ? " <b>שימו לב:</b> זה לא ההתקן שנבחר — הוא אינו זמין." : "";
+        if (res.heard === true && silenced) {
+          // מד השיא מודד את הזרם לפני בקרת העוצמה של ההתקן
+          result.innerHTML = '<div class="notice warn" style="margin-top:12px">' +
+            "⚠️ האות מגיע" + where + ", אבל ההתקן " +
+            (dev.muted ? "<b>מושתק</b>" : "<b>בעוצמה 0%</b>") +
+            " — לכן לא יישמע כלום. פתחו את עוצמת ההתקן במיקסר של Windows." +
+            fellBack + "</div>";
+        } else if (res.heard === true) {
           result.innerHTML = '<div class="notice info" style="margin-top:12px">' +
-            "✅ נמדד פלט שמע (שיא " + res.peak + "). אם לא שמעתם — בדקו את עוצמת הרמקולים עצמם.</div>";
+            "✅ נמדד פלט שמע" + where + " (שיא " + res.peak + ", עוצמת ההתקן " +
+            dev.volume + "%)." + fellBack +
+            " אם לא שמעתם — בדקו את הרמקולים עצמם ואת החיבור.</div>";
         } else if (res.heard === false) {
           result.innerHTML = '<div class="notice warn" style="margin-top:12px">' +
-            "❌ לא נמדד שום פלט שמע. הצלצול הופעל אבל שום צליל לא הגיע להתקן.</div>";
+            "❌ לא נמדד שום פלט שמע" + where + ". הצלצול הופעל אבל שום צליל לא הגיע להתקן." +
+            fellBack + "</div>";
         } else {
           result.innerHTML = '<div class="notice info" style="margin-top:12px">' +
             (res.started ? "הצלצול הופעל." : "❌ הפעלת הצלצול נכשלה.") + "</div>";
