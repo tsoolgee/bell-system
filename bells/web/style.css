@@ -356,3 +356,23 @@ body.kiosk #kiosk { display: flex !important; }
   .sidenav button { width: auto; white-space: nowrap; }
   .topbar .clock { font-size: 20px; }
 }
+
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #f8fafc;
+  outline: none;
+  resize: vertical;
+  line-height: 1.6;
+  transition: border-color .15s, box-shadow .15s;
+}
+textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); background: #fff; }
+
+.notice { border-radius: 12px; padding: 12px 14px; font-size: 13px; margin-bottom: 14px; line-height: 1.6; }
+.notice.warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.notice.info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+.notice a { color: inherit; font-weight: 700; }
+
+.btn.loading { opacity: .7; pointer-events: none; }

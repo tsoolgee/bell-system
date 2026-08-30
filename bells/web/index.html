@@ -112,6 +112,27 @@
         <p style="color:var(--muted);font-size:12px;margin-top:8px">הקובץ נשמר בתוך המערכת וזמין לכל צלצול. גודל מרבי 25MB.</p>
         <div id="soundsList" style="margin-top:16px"></div>
       </div>
+
+      <div class="card">
+        <h2>📢 יצירת כרוז מוקלט <span class="sub">הקלידו טקסט — המערכת תהפוך אותו להודעה קולית</span></h2>
+        <label class="field"><span>מה להכריז</span>
+          <textarea id="ttsText" rows="3" maxlength="1500" placeholder="למשל: תלמידים יקרים, ההפסקה הסתיימה, נא לחזור לכיתות."></textarea>
+        </label>
+        <div class="row">
+          <label class="field" style="flex:1"><span>מקור הקול</span>
+            <select id="ttsProvider" onchange="App.ttsProviderChanged()">
+              <option value="gemini">Gemini — אונליין, קול טבעי בעברית</option>
+              <option value="sapi">Windows — אופליין, ללא מפתח</option>
+            </select>
+          </label>
+          <label class="field" style="flex:1"><span>קול</span><select id="ttsVoice"></select></label>
+        </div>
+        <label class="field"><span>שם הצליל בספרייה</span><input type="text" id="ttsName" maxlength="50" placeholder="ריק = לפי תחילת הטקסט"></label>
+        <div id="ttsNotice"></div>
+        <div class="row">
+          <button class="btn primary big" style="flex:1" id="ttsCreateBtn" onclick="App.createAnnouncement()">📢 צור כרוז</button>
+        </div>
+      </div>
     </section>
 
     <!-- ============ הגדרות ============ -->
@@ -165,6 +186,18 @@
           <input type="file" id="restoreFile" accept=".zip,.json" hidden onchange="App.restore(event)">
           <button class="btn wide" style="margin-top:10px" onclick="document.getElementById('restoreFile').click()">⬆️ שחזור מגיבוי</button>
           <p style="color:var(--muted);font-size:12px;margin-top:12px">תיקיית הנתונים: <code id="dataDir"></code></p>
+        </div>
+
+        <div class="card">
+          <h2>📢 כרוז אונליין <span class="sub">Gemini</span></h2>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:14px">
+            כדי ליצור כרוז בקול טבעי בעברית צריך מפתח API של Google AI Studio.
+            המפתח נשמר במחשב הזה בלבד, לא נכלל בגיבוי, והטקסט נשלח החוצה רק
+            כשלוחצים על „צור כרוז“. בלי מפתח אפשר להשתמש בקולות Windows שבמחשב.
+          </p>
+          <label class="field"><span>מפתח API</span><input type="password" id="setTtsKey" placeholder="השאירו ריק כדי למחוק את המפתח"></label>
+          <button class="btn primary wide" onclick="App.saveTtsKey()">💾 שמירת מפתח</button>
+          <div id="ttsKeyState" style="margin-top:12px;font-size:13px;color:var(--muted)"></div>
         </div>
 
         <div class="card">

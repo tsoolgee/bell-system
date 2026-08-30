@@ -26,6 +26,7 @@ jobs:
       - name: Run tests
         run: |
           python tests/t_engine.py
+          python tests/t_tts.py
 
       - name: Build EXE
         run: python build.py

@@ -16,7 +16,7 @@ import urllib.parse
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import audio, autostart, config, engine, jewcal, schedule
+from . import audio, autostart, config, engine, jewcal, schedule, tts
 
 MAX_UPLOAD = 25 * 1024 * 1024
 ALLOWED_AUDIO = {".mp3", ".wav", ".m4a", ".ogg", ".wma", ".aac"}
@@ -141,8 +141,10 @@ class Handler(BaseHTTPRequestHandler):
             cfg = config.get()
             st = dict(cfg["settings"])
             st.pop("pinHash", None)
+            st.pop("ttsApiKey", None)
             st["autostart"] = autostart.is_enabled()
             st["hasPin"] = bool(cfg["settings"].get("pinHash"))
+            st["hasTtsKey"] = bool(cfg["settings"].get("ttsApiKey"))
             return self._json({
                 "settings": st,
                 "bells": cfg["bells"],
@@ -164,6 +166,17 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 days = 21
             return self._json({"days": self._calendar_preview(days)})
+        if path == "/api/tts":
+            st = config.settings()
+            return self._json({
+                "provider": st.get("ttsProvider", "gemini"),
+                "voice": st.get("ttsVoice", "Kore"),
+                "sapiVoice": st.get("ttsSapiVoice", ""),
+                "rate": st.get("ttsRate", 0),
+                "hasKey": bool(st.get("ttsApiKey")),
+                "geminiVoices": [{"id": v, "name": n} for v, n in tts.GEMINI_VOICES],
+                "sapiVoices": tts.sapi_voices(),
+            })
         if path == "/api/backup":
             return self._backup()
         return self._error("לא נמצא", 404)
@@ -199,7 +212,9 @@ class Handler(BaseHTTPRequestHandler):
     def _backup(self):
         buf = io.BytesIO()
         cfg = config.snapshot()
+        # סודות לא נוסעים בגיבוי
         cfg["settings"].pop("pinHash", None)
+        cfg["settings"].pop("ttsApiKey", None)
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("config.json", json.dumps(cfg, ensure_ascii=False, indent=2))
             for snd in cfg.get("sounds", []):
@@ -252,6 +267,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/sounds/delete": self._delete_sound,
             "/api/sounds/rename": self._rename_sound,
             "/api/autostart": self._set_autostart,
+            "/api/tts/key": self._set_tts_key,
+            "/api/tts/create": self._create_announcement,
         }
         if path in handlers:
             return handlers[path](self._payload())
@@ -265,7 +282,8 @@ class Handler(BaseHTTPRequestHandler):
         st = config.settings()
         allowed = {"volume", "city", "lat", "lon", "candleMinutes", "havdalahMode",
                    "havdalahMinutes", "havdalahDegrees", "shabbatEnabled", "holidaysAuto",
-                   "israel", "erevChagStop", "startMinimized"}
+                   "israel", "erevChagStop", "startMinimized",
+                   "ttsProvider", "ttsVoice", "ttsSapiVoice", "ttsRate"}
         for key, value in data.items():
             if key in allowed:
                 st[key] = value
@@ -458,6 +476,46 @@ class Handler(BaseHTTPRequestHandler):
         config.save()
         return self._json({"ok": True})
 
+    def _set_tts_key(self, data):
+        config.settings()["ttsApiKey"] = str(data.get("key") or "").strip()
+        config.save()
+        engine.log("מפתח הכרוז " + ("נשמר" if config.settings()["ttsApiKey"] else "הוסר"),
+                   "system")
+        return self._json({"ok": True, "hasKey": bool(config.settings()["ttsApiKey"])})
+
+    def _create_announcement(self, data):
+        """יוצר קובץ כרוז ומוסיף אותו לספריית הצלילים."""
+        st = config.settings()
+        provider = data.get("provider") or st.get("ttsProvider", "gemini")
+        voice = data.get("voice") or (st.get("ttsSapiVoice") if provider == "sapi"
+                                      else st.get("ttsVoice", "Kore"))
+        text = data.get("text") or ""
+        try:
+            wav = tts.synthesize(text, provider=provider, voice=voice,
+                                 api_key=st.get("ttsApiKey", ""),
+                                 rate=int(st.get("ttsRate", 0)))
+        except tts.TTSError as exc:
+            engine.log("יצירת כרוז נכשלה: %s" % exc, "error")
+            return self._error(str(exc))
+
+        # זוכרים את הבחירה האחרונה כדי שלא יצטרכו לבחור כל פעם מחדש
+        st["ttsProvider"] = provider
+        if provider == "sapi":
+            st["ttsSapiVoice"] = voice
+        else:
+            st["ttsVoice"] = voice
+
+        label = (data.get("name") or "").strip() or ("כרוז: " + text.strip()[:28])
+        filename = _unique_name(config.sounds_dir(), _safe_name(label) + ".wav")
+        with open(os.path.join(config.sounds_dir(), filename), "wb") as fh:
+            fh.write(wav)
+        snd = {"id": config.new_id(), "name": label[:50], "file": filename,
+               "builtin": False, "announcement": True}
+        config.get()["sounds"].append(snd)
+        config.save()
+        engine.log("נוצר כרוז: " + snd["name"], "system")
+        return self._json({"ok": True, "sound": snd})
+
     def _set_autostart(self, data):
         wanted = bool(data.get("enabled"))
         ok = autostart.set_enabled(wanted)
@@ -483,11 +541,10 @@ class Handler(BaseHTTPRequestHandler):
                 data = json.loads(raw.decode("utf-8"))
         except (ValueError, KeyError, zipfile.BadZipFile, UnicodeDecodeError):
             return self._error("קובץ הגיבוי אינו תקין")
-        keep_pin = config.settings().get("pinHash", "")
-        keep_port = config.settings().get("port")
+        keep = {k: config.settings().get(k)
+                for k in ("pinHash", "port", "ttsApiKey")}
         config.replace(data)
-        config.settings()["pinHash"] = keep_pin
-        config.settings()["port"] = keep_port
+        config.settings().update({k: v for k, v in keep.items() if v is not None})
         config.save()
         engine.log("שוחזר גיבוי", "system")
         return self._json({"ok": True})

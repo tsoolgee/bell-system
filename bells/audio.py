@@ -27,15 +27,18 @@ def _send(command):
 
 
 def _open(path):
+    """פותח את הקובץ ומחזיר (alias, האם ניתן לשלוט בעוצמה).
+
+    mpegvideo (DirectShow) קודם בכוונה: הוא היחיד שתומך ב-setaudio volume,
+    וגם קורא WAV, MP3 ו-M4A. waveaudio נשאר כגיבוי לקבצים שהוא נכשל בהם.
+    """
     alias = "bell%d" % next(_counter)
-    err, _ = _send('open "%s" alias %s' % (path, alias))
-    if err:
-        # ניסיון שני עם ציון סוג מפורש, לקבצים עם סיומת חריגה
-        kind = "waveaudio" if path.lower().endswith(".wav") else "mpegvideo"
-        err, _ = _send('open "%s" type %s alias %s' % (path, kind, alias))
-        if err:
-            return None
-    return alias
+    for kind in ("mpegvideo", None, "waveaudio"):
+        cmd = ('open "%s" alias %s' % (path, alias) if kind is None
+               else 'open "%s" type %s alias %s' % (path, kind, alias))
+        if _send(cmd)[0] == 0:
+            return alias, kind == "mpegvideo"
+    return None, False
 
 
 def _length_ms(alias):
@@ -70,10 +73,11 @@ def play(path, duration=5, volume=90, on_done=None):
     if not path or not os.path.exists(path):
         return False
     stop()
-    alias = _open(path)
+    alias, can_set_volume = _open(path)
     if alias is None:
         return False
-    _send("setaudio %s volume to %d" % (alias, max(0, min(1000, int(volume) * 10))))
+    if can_set_volume:
+        _send("setaudio %s volume to %d" % (alias, max(0, min(1000, int(volume) * 10))))
     stop_event = threading.Event()
     with _lock:
         global _current

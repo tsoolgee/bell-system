@@ -59,6 +59,7 @@ const App = {
     document.querySelectorAll(".sidenav button").forEach(b =>
       b.classList.toggle("active", b.dataset.view === view));
     if (view === "calendar") this.loadPreview();
+    if (view === "sounds") this.loadTts();
     if (view === "settings") this.loadLog();
   },
 
@@ -90,6 +91,7 @@ const App = {
     this.renderExceptions();
     this.renderShabbatSettings();
     this.fillSettings();
+    this.loadTts();
   },
 
   async refresh() {
@@ -359,9 +361,10 @@ const App = {
     document.getElementById("soundsList").innerHTML = list.map(s => {
       const used = this.cfg.bells.filter(b => b.sound === s.id).length;
       return '<div class="bell-row">' +
-        '<div style="font-size:22px">' + (s.builtin ? "🔔" : "🎵") + "</div>" +
+        '<div style="font-size:22px">' +
+        (s.builtin ? "🔔" : s.announcement ? "📢" : "🎵") + "</div>" +
         '<div class="info"><b>' + this.esc(s.name) + "</b><small>" +
-        (s.builtin ? "צליל מובנה" : this.esc(s.file)) +
+        (s.builtin ? "צליל מובנה" : s.announcement ? "כרוז מוקלט" : this.esc(s.file)) +
         (used ? " · בשימוש ב" + (used === 1 ? "צלצול אחד" : "־" + used + " צלצולים") : "") + "</small></div>" +
         '<div class="acts"><button onclick="App.previewSound(\'' + s.id + '\')">▶️ נגן</button>' +
         (s.builtin ? "" : '<button class="danger" onclick="App.deleteSound(\'' + s.id + '\')">🗑️ מחק</button>') +
@@ -402,6 +405,95 @@ const App = {
       await this.api("/api/sounds/delete", { json: { id, force } });
       await this.loadConfig();
       this.toast("הצליל נמחק");
+    });
+  },
+
+  /* ---------------- כרוז ---------------- */
+
+  async loadTts() {
+    try {
+      this.tts = await (await fetch("/api/tts")).json();
+    } catch (err) { return; }
+    document.getElementById("ttsProvider").value = this.tts.provider;
+    document.getElementById("ttsKeyState").textContent = this.tts.hasKey
+      ? "🔑 מפתח Gemini שמור — אפשר ליצור כרוז בעברית."
+      : "⚠️ אין מפתח — כרגע זמינים רק קולות Windows שבמחשב.";
+    this.ttsProviderChanged();
+  },
+
+  ttsProviderChanged() {
+    if (!this.tts) return;
+    const provider = document.getElementById("ttsProvider").value;
+    const select = document.getElementById("ttsVoice");
+    const notice = document.getElementById("ttsNotice");
+    const button = document.getElementById("ttsCreateBtn");
+    button.disabled = false;
+
+    if (provider === "gemini") {
+      select.innerHTML = this.tts.geminiVoices.map(v =>
+        '<option value="' + v.id + '"' + (v.id === this.tts.voice ? " selected" : "") + ">" +
+        this.esc(v.name) + "</option>").join("");
+      notice.innerHTML = this.tts.hasKey
+        ? '<div class="notice info">הטקסט יישלח ל־Google ליצירת ההקלטה, והקובץ יישמר במחשב. ' +
+          "אחרי היצירה הכרוז עובד גם בלי אינטרנט.</div>"
+        : '<div class="notice warn"><b>נדרש מפתח API.</b> קבלו מפתח חינם ב־Google AI Studio ' +
+          "והזינו אותו במסך ההגדרות, או עברו לקולות Windows.</div>";
+      button.disabled = !this.tts.hasKey;
+      return;
+    }
+
+    const voices = this.tts.sapiVoices || [];
+    select.innerHTML = voices.length
+      ? voices.map(v => '<option value="' + this.esc(v.name) + '"' +
+          (v.name === this.tts.sapiVoice ? " selected" : "") + ">" +
+          this.esc(v.name) + " (" + this.esc(v.culture) + ")</option>").join("")
+      : "<option value=''>לא נמצאו קולות</option>";
+    const hebrew = voices.some(v => v.hebrew);
+    notice.innerHTML = !voices.length
+      ? '<div class="notice warn">לא נמצאו קולות Windows במחשב הזה.</div>'
+      : hebrew
+        ? '<div class="notice info">הכרוז ייווצר במחשב עצמו, בלי אינטרנט ובלי מפתח.</div>'
+        : '<div class="notice warn"><b>אין קול עברי מותקן במחשב.</b> קול אנגלי יקריא טקסט ' +
+          "עברי בצורה לא מובנת. להודעה בעברית השתמשו ב־Gemini, או התקינו קול עברי " +
+          "דרך הגדרות Windows ← שעה ושפה ← דיבור.</div>";
+    button.disabled = !voices.length;
+  },
+
+  createAnnouncement() {
+    const text = document.getElementById("ttsText").value.trim();
+    if (!text) { this.toast("נא להזין טקסט לכרוז", true); return; }
+    const button = document.getElementById("ttsCreateBtn");
+    button.classList.add("loading");
+    button.textContent = "⏳ יוצר כרוז…";
+    this.guard(async () => {
+      try {
+        const res = await this.api("/api/tts/create", {
+          json: {
+            text: text,
+            provider: document.getElementById("ttsProvider").value,
+            voice: document.getElementById("ttsVoice").value,
+            name: document.getElementById("ttsName").value
+          }
+        });
+        document.getElementById("ttsText").value = "";
+        document.getElementById("ttsName").value = "";
+        await this.loadConfig();
+        this.toast("הכרוז נוסף לספריית הצלילים");
+        this.previewSound(res.sound.id);
+      } finally {
+        button.classList.remove("loading");
+        button.textContent = "📢 צור כרוז";
+      }
+    });
+  },
+
+  saveTtsKey() {
+    const key = document.getElementById("setTtsKey").value.trim();
+    this.guard(async () => {
+      await this.api("/api/tts/key", { json: { key } });
+      document.getElementById("setTtsKey").value = "";
+      await this.loadTts();
+      this.toast(key ? "המפתח נשמר" : "המפתח נמחק");
     });
   },
 

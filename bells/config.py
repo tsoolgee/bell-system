@@ -71,6 +71,11 @@ def _defaults():
             "startMinimized": True,
             "requirePin": False,
             "pinHash": "",
+            "ttsProvider": "gemini",   # gemini (אונליין) | sapi (אופליין)
+            "ttsVoice": "Kore",
+            "ttsSapiVoice": "",
+            "ttsRate": 0,
+            "ttsApiKey": "",           # נשמר מקומית בלבד, לא נכלל בגיבוי
         },
         "bells": [],
         "sounds": [],
