@@ -29,9 +29,25 @@ def _normalize(samples, peak=TARGET_PEAK):
     return [s * gain for s in samples]
 
 
-def _saturate(samples, drive=1.6):
-    """הגברה רכה - מעלה את העוצמה הנשמעת בלי עיוות דיגיטלי צורם."""
-    return [math.tanh(s * drive) for s in samples]
+def _loudness(samples, target_rms, knee=0.72):
+    """מכוון לעוצמה נשמעת (RMS) ולא רק לשיא.
+
+    השיא כבר מוצה - הוא נוגע ב-0dBFS. מה שנשמע חזק יותר הוא צפיפות
+    האנרגיה, ולכן מגבירים ודוחסים ברכה את מה שחורג מהברך, במקום לחתוך.
+    """
+    rms = (sum(v * v for v in samples) / len(samples)) ** 0.5
+    if rms < 1e-6:
+        return samples
+    gain = target_rms / rms
+    out = []
+    for value in samples:
+        value *= gain
+        magnitude = abs(value)
+        if magnitude > knee:
+            magnitude = knee + (1.0 - knee) * math.tanh((magnitude - knee) / (1.0 - knee))
+            value = math.copysign(magnitude, value)
+        out.append(value)
+    return _normalize(out)
 
 
 def _fade_edges(samples, ms=12):
@@ -80,11 +96,11 @@ def _mix(layers, seconds):
 
 
 def bell_classic():
-    return _fade_edges(_saturate(_normalize(_electric_bell(4.0, 680.0, 23.0)), 1.9))
+    return _fade_edges(_loudness(_normalize(_electric_bell(4.0, 680.0, 23.0)), 0.55))
 
 
 def bell_break():
-    return _fade_edges(_saturate(_normalize(_electric_bell(4.0, 505.0, 15.0, depth=0.8)), 1.7))
+    return _fade_edges(_loudness(_normalize(_electric_bell(4.0, 505.0, 15.0, depth=0.8)), 0.52))
 
 
 def chime():
@@ -93,13 +109,13 @@ def chime():
     for i, f in enumerate(notes):
         layers.append((i * 0.55, _struck([(f, 1.0), (f * 2, 0.35), (f * 3, 0.12)], 3.2, decay=1.5)))
     layers.append((2.2, _struck([(523.25, 0.9), (783.99, 0.7), (1046.50, 0.5)], 3.0, decay=1.0)))
-    return _fade_edges(_saturate(_normalize(_mix(layers, 5.0)), 1.5))
+    return _fade_edges(_loudness(_normalize(_mix(layers, 5.0)), 0.45))
 
 
 def gong():
     body = _struck([(110, 1.0), (164, 0.7), (220, 0.55), (277, 0.35),
                     (330, 0.25), (441, 0.15)], 4.0, decay=0.75)
-    return _fade_edges(_saturate(_normalize(body), 2.2))
+    return _fade_edges(_loudness(_normalize(body), 0.45))
 
 
 def siren():
@@ -108,7 +124,7 @@ def siren():
         freq = 700 + 480 * math.sin(2 * math.pi * 0.75 * (i / RATE))
         phase += 2 * math.pi * freq / RATE
         out.append(math.sin(phase))
-    return _fade_edges(_saturate(_normalize(out), 1.5), ms=50)
+    return _fade_edges(_loudness(_normalize(out), 0.60), ms=50)
 
 
 GENERATORS = {
@@ -120,7 +136,7 @@ GENERATORS = {
 }
 
 # מזהה גרסה: שינוי כאן מייצר מחדש את הצלילים המובנים אצל מי שכבר התקין.
-REVISION = 2
+REVISION = 3
 
 
 def ensure(target_dir):

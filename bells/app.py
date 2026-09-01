@@ -123,6 +123,8 @@ def main(argv=None):
                 except KeyboardInterrupt:
                     pass
                 break
+            engine.log("לולאת המגש הסתיימה (יציאה יזומה: %s)"
+                       % icon.quit_requested, "system")
             if icon.quit_requested:
                 break
             engine.log("מגש המערכת נסגר מעצמו - מרים מחדש (ניסיון %d)" % attempt, "error")

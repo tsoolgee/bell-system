@@ -67,7 +67,7 @@ def _rate_from_mime(mime):
     return int(match.group(1)) if match else 24000
 
 
-def _boost(wav_bytes, target_rms=0.20, max_gain=8.0, knee=0.70):
+def _boost(wav_bytes, target_rms=0.30, max_gain=12.0, knee=0.72):
     """מגביר כרוז לעוצמה שנשמעת מעל רעש של כיתה.
 
     מכוון לפי RMS ולא לפי שיא, כי בדיבור השיא בודד והשאר חלש. מה שחורג

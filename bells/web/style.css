@@ -376,3 +376,37 @@ textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99
 .notice a { color: inherit; font-weight: 700; }
 
 .btn.loading { opacity: .7; pointer-events: none; }
+
+/* ---------- קרדיט ---------- */
+
+.credit {
+  display: block;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  text-decoration: none;
+  color: var(--muted);
+  border-radius: 11px;
+  transition: background .15s, color .15s;
+}
+.credit:hover { background: #eff6ff; color: var(--primary-dark); }
+.credit .by { display: block; font-size: 11px; }
+.credit .who { display: block; font-size: 14px; font-weight: 800; color: var(--ink); }
+.credit:hover .who { color: var(--primary-dark); }
+.credit .site { display: block; font-size: 11px; font-weight: 700; letter-spacing: .5px; color: var(--primary); margin-top: 2px; }
+
+#kiosk .k-credit {
+  position: absolute;
+  bottom: 18px;
+  inset-inline-end: 22px;
+  font-size: clamp(11px, 1.4vw, 15px);
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: rgba(255, 255, 255, .55);
+  text-decoration: none;
+}
+#kiosk .k-credit:hover { color: #fff; }
+
+@media (max-width: 860px) {
+  .credit { border-top: none; border-inline-start: 1px solid var(--line); margin-top: 0; white-space: nowrap; }
+}

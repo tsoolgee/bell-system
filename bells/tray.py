@@ -2,6 +2,7 @@
 """אייקון מגש המערכת - הפנים של המערכת כשהיא רצה ברקע."""
 
 import threading
+import traceback
 
 from PIL import Image, ImageDraw
 
@@ -82,6 +83,11 @@ class Tray:
         )
 
     def _quit(self):
+        # תועד מקרה של יציאה שאיש לא ביקש. עד שהמקור יתברר, רושמים
+        # מאיפה הגיעה הקריאה - זו הראיה היחידה שתהיה אחרי המקרה.
+        where = " | ".join(line.strip() for line in
+                           traceback.format_stack(limit=6) if line.strip())
+        engine.log("התקבלה בקשת יציאה מהמגש. מקור: " + where[:600], "error")
         self.quit_requested = True
         if self.on_quit:
             self.on_quit()

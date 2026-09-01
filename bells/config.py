@@ -54,7 +54,7 @@ def _defaults():
         "settings": {
             "enabled": True,
             "muted": False,
-            "volume": 90,
+            "volume": 100,
             "outputDevice": "",        # ריק = התקן ברירת המחדל של Windows
             "port": 8730,
             "city": "ירושלים",
