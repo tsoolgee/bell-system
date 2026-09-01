@@ -45,6 +45,13 @@ def commands(verb):
     return [entry for entry in log if entry[0] == verb]
 
 
+# שרתי CI רצים בלי כרטיס קול. אין טעם להיכשל על כך - מדלגים בבירור.
+if not audio.play(path, duration=1, volume=50):
+    print("דילוג: אין התקן שמע זמין במכונה הזו")
+    sys.exit(0)
+audio.stop()
+time.sleep(0.3)
+
 print("--- השמעה מתהליכון אחר (כמו בקשת HTTP) ---")
 result = {}
 
