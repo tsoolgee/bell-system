@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """גרסת המערכת. התג ב-GitHub חייב להיות זהה לה - הבנייה מוודאת את זה."""
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 REPO = "tsoolgee/bell-system"
 ASSET = "BellSystem.exe"
 

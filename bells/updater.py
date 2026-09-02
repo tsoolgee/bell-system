@@ -44,6 +44,26 @@ def exe_path():
     return sys.executable if getattr(sys, "frozen", False) else ""
 
 
+def _clean_env():
+    """סביבה נקייה למופע היורש.
+
+    PyInstaller מסמן לתהליך שלו ב-_MEIPASS2 היכן הוא כבר חילץ את עצמו.
+    מופע שיורש את המשתנה הזה מדלג על החילוץ ומצביע לתיקיית ה-temp של
+    הישן - שנמחקת ברגע שהישן יוצא, והחדש נתקע בלי להעלות כלום. גם
+    נתיבי הספריות שהוזרקו לתהליך הנוכחי חוזרים לערכם המקורי.
+    """
+    env = dict(os.environ)
+    env.pop("_MEIPASS2", None)
+    env.pop("_PYI_APPLICATION_HOME_DIR", None)
+    env.pop("_PYI_ARCHIVE_FILE", None)
+    env.pop("_PYI_PARENT_PROCESS_LEVEL", None)
+    for name in ("PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+        original = env.pop(name + "_ORIG", None)
+        if original is not None:
+            env[name] = original
+    return env
+
+
 def cleanup():
     """מוחק את הגרסה הקודמת שנשארה אחרי עדכון."""
     exe = exe_path()
@@ -193,6 +213,7 @@ def apply(path=None):
     engine.log("מתעדכן לגרסה %s ומופעל מחדש" % _state.get("latest"), "system")
     try:
         subprocess.Popen([exe, "--minimized", "--after-update", str(os.getpid())],
+                         env=_clean_env(), cwd=os.path.dirname(exe) or None,
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except OSError as exc:
         with _lock:

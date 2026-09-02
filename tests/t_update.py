@@ -85,6 +85,18 @@ ok, reason = updater.safe_to_restart()
 check("מופע בסשן מנותק לא מעדכן", not ok, reason)
 storage.is_active_session = real_session
 
+print("--- סביבה למופע היורש ---")
+import os as _os
+_os.environ["_MEIPASS2"] = r"C:\Temp\_MEI12345"
+_os.environ["PATH_ORIG"] = "C:\Windows"
+env = updater._clean_env()
+check("_MEIPASS2 מוסר", "_MEIPASS2" not in env, env.get("_MEIPASS2"))
+check("PATH מוחזר לערכו המקורי", env.get("PATH") == "C:\Windows", env.get("PATH"))
+check("PATH_ORIG לא נשאר", "PATH_ORIG" not in env)
+check("שאר הסביבה נשמרת", env.get("TEMP") == _os.environ.get("TEMP"))
+_os.environ.pop("_MEIPASS2", None)
+_os.environ.pop("PATH_ORIG", None)
+
 print("--- מצב ---")
 st = updater.status()
 check("המצב מדווח גרסה נוכחית", st["current"] == version.VERSION, st.get("current"))
