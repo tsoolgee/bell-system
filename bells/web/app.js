@@ -686,10 +686,76 @@ const App = {
     document.getElementById("swMinimized").classList.toggle("on", st.startMinimized);
     document.getElementById("swPower").classList.toggle("on", st.enabled);
     this.renderMultiUser();
+    this.loadUpdate();
     document.getElementById("pinState").textContent = st.hasPin
       ? "🔐 נעילת מנהל פעילה."
       : "🔓 אין קוד מנהל — כל מי שפותח את המערכת יכול לשנות הגדרות.";
     this.havModeChanged();
+  },
+
+  async loadUpdate() {
+    let u;
+    try {
+      u = await (await fetch("/api/update")).json();
+    } catch (err) { return; }
+    this.update = u;
+    document.getElementById("verLabel").textContent = "גרסה " + u.current;
+    document.getElementById("swAutoUpdate").classList.toggle("on", !!u.auto);
+    const box = document.getElementById("updateState");
+    const install = document.getElementById("updInstallBtn");
+    install.hidden = !u.available;
+
+    if (!u.frozen) {
+      box.innerHTML = '<div class="notice info">רץ מהמקור — עדכון אוטומטי פועל רק על קובץ ה-EXE.</div>';
+      return;
+    }
+    if (u.available) {
+      box.innerHTML = '<div class="notice warn">⬆️ <b>גרסה ' + this.esc(u.latest) +
+        " זמינה</b> (מותקנת: " + this.esc(u.current) + ")." +
+        (u.auto ? (u.safe
+            ? " תותקן בקרוב — " + this.esc(u.safeReason) + "."
+            : " ממתינה לחלון פנוי: " + this.esc(u.safeReason) + ".")
+          : " העדכון האוטומטי כבוי.") +
+        (u.notes ? '<br><small style="opacity:.8">' +
+          this.esc(u.notes.split(/\r?\n/)[0].slice(0, 120)) + "</small>" : "") +
+        "</div>";
+    } else if (u.error) {
+      box.innerHTML = '<div class="notice warn">⚠️ ' + this.esc(u.error) + "</div>";
+    } else {
+      box.innerHTML = '<div class="notice info">✅ המערכת מעודכנת' +
+        (u.lastCheck ? " — נבדק ב־" + u.lastCheck.slice(11, 16) : "") + ".</div>";
+    }
+  },
+
+  checkUpdate() {
+    const btn = document.getElementById("updCheckBtn");
+    btn.classList.add("loading");
+    btn.textContent = "⏳ בודק…";
+    this.guard(async () => {
+      try {
+        await this.api("/api/update/check", { json: {} });
+        await this.loadUpdate();
+        this.toast(this.update.available
+          ? "גרסה " + this.update.latest + " זמינה"
+          : this.update.error || "המערכת מעודכנת");
+      } finally {
+        btn.classList.remove("loading");
+        btn.textContent = "🔍 בדוק עכשיו";
+      }
+    });
+  },
+
+  installUpdate() {
+    const u = this.update || {};
+    const why = u.safeReason ? " (" + u.safeReason + ")" : "";
+    if (!u.safe && !confirm("המערכת תתחיל מחדש עכשיו" + why + ". להתקין בכל זאת?")) return;
+    const btn = document.getElementById("updInstallBtn");
+    btn.classList.add("loading");
+    btn.textContent = "⏳ מתקין…";
+    this.guard(async () => {
+      await this.api("/api/update/install", { json: { force: !u.safe } });
+      this.toast("מתקין ומפעיל מחדש — הדף יתחבר שוב בעוד רגע");
+    });
   },
 
   renderMultiUser() {

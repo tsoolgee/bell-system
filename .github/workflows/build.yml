@@ -26,6 +26,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-build.txt
 
+      - name: Tag must match bells/version.py
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver=$(python -c "from bells.version import VERSION; print(VERSION)")
+          echo "tag=$tag version=$ver"
+          test "$tag" = "$ver" || { echo "::error::tag $tag does not match VERSION $ver"; exit 1; }
+
       - name: Run tests
         run: |
           python tests/t_engine.py
@@ -34,6 +43,7 @@ jobs:
           python tests/t_tray_restart.py
           python tests/t_upgrade.py
           python tests/t_multiuser.py
+          python tests/t_update.py
 
       - name: Build EXE
         run: python build.py

@@ -16,7 +16,7 @@ import urllib.parse
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import audio, autostart, config, engine, jewcal, outdev, schedule, tts
+from . import audio, autostart, config, engine, jewcal, outdev, schedule, tts, updater
 
 MAX_UPLOAD = 25 * 1024 * 1024
 ALLOWED_AUDIO = {".mp3", ".wav", ".m4a", ".ogg", ".wma", ".aac"}
@@ -202,6 +202,8 @@ class Handler(BaseHTTPRequestHandler):
             data["canChoose"] = bool(data["devices"])
             data["fellBack"] = audio.device_fell_back()
             return self._json(data)
+        if path == "/api/update":
+            return self._json(updater.status())
         if path == "/api/backup":
             return self._backup()
         return self._error("לא נמצא", 404)
@@ -294,6 +296,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/sounds/delete": self._delete_sound,
             "/api/sounds/rename": self._rename_sound,
             "/api/autostart": self._set_autostart,
+            "/api/update/check": self._check_update,
+            "/api/update/install": self._install_update,
             "/api/tts/key": self._set_tts_key,
             "/api/tts/create": self._create_announcement,
         }
@@ -307,7 +311,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _set_settings(self, data):
         st = config.settings()
-        allowed = {"volume", "outputDevice", "city", "lat", "lon", "candleMinutes", "havdalahMode",
+        allowed = {"volume", "outputDevice", "autoUpdate",
+                   "city", "lat", "lon", "candleMinutes", "havdalahMode",
                    "havdalahMinutes", "havdalahDegrees", "shabbatEnabled", "holidaysAuto",
                    "israel", "erevChagStop", "startMinimized",
                    "ttsProvider", "ttsVoice", "ttsSapiVoice", "ttsRate"}
@@ -559,6 +564,27 @@ class Handler(BaseHTTPRequestHandler):
         config.save()
         engine.log("נוצר כרוז: " + snd["name"], "system")
         return self._json({"ok": True, "sound": snd})
+
+    def _check_update(self, data):
+        return self._json(updater.check())
+
+    def _install_update(self, data):
+        """התקנה יזומה. גם כאן לא מתעדכנים כשצלצול קרוב, אלא אם ביקשו במפורש."""
+        if not updater.available():
+            return self._error("אין גרסה חדשה להתקנה")
+        ok, reason = updater.safe_to_restart()
+        if not ok and not data.get("force"):
+            return self._error("לא בטוח לעדכן עכשיו: " + reason)
+        path = updater.download()
+        if not path:
+            return self._error(updater.status().get("error") or "ההורדה נכשלה")
+        threading.Timer(1.0, self._finish_update).start()
+        return self._json({"ok": True, "restarting": True})
+
+    def _finish_update(self):
+        if updater.apply():
+            engine.log("מופעל מחדש לאחר עדכון", "system")
+            os._exit(0)   # התהליך החדש כבר עלה וממתין לשחרור הנעילה
 
     def _set_autostart(self, data):
         wanted = bool(data.get("enabled"))

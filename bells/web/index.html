@@ -190,6 +190,19 @@
         </div>
 
         <div class="card">
+          <h2>⬆️ עדכוני גרסה <span class="sub" id="verLabel"></span></h2>
+          <div class="toggle">
+            <div class="txt"><b>עדכון אוטומטי</b><small>מתקין גרסה חדשה לבד, רק כשאין צלצול בטווח 20 דקות</small></div>
+            <div class="switch" id="swAutoUpdate" onclick="App.toggleSwitch('swAutoUpdate','autoUpdate')"></div>
+          </div>
+          <div id="updateState" style="margin-top:14px"></div>
+          <div class="row">
+            <button class="btn" style="flex:1" id="updCheckBtn" onclick="App.checkUpdate()">🔍 בדוק עכשיו</button>
+            <button class="btn primary" style="flex:1" id="updInstallBtn" hidden onclick="App.installUpdate()">⬇️ התקן עכשיו</button>
+          </div>
+        </div>
+
+        <div class="card">
           <h2>👥 כמה משתמשים במחשב <span class="sub">כדי שהצלצולים יעבדו לכולם</span></h2>
           <div id="multiUser"></div>
         </div>

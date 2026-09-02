@@ -12,7 +12,7 @@ import time
 import urllib.request
 import webbrowser
 
-from . import config, engine, server, sounds, tray
+from . import config, engine, server, sounds, tray, updater
 
 _mutex = None
 
@@ -36,6 +36,20 @@ def already_running():
         return False
     _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, _mutex_name())
     return ctypes.windll.kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+
+
+def _wait_for_exit(pid, timeout=30):
+    """אחרי עדכון: ממתינים שהמופע הקודם ישחרר את הנעילה ואת הפורט."""
+    if sys.platform != "win32" or pid <= 0:
+        return
+    SYNCHRONIZE = 0x00100000
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        if not handle:
+            return
+        ctypes.windll.kernel32.CloseHandle(handle)
+        time.sleep(0.5)
 
 
 def running_port():
@@ -85,7 +99,12 @@ def main(argv=None):
     parser.add_argument("--minimized", action="store_true", help="עלייה שקטה למגש המערכת")
     parser.add_argument("--port", type=int, help="פורט לממשק הניהול")
     parser.add_argument("--no-tray", action="store_true", help="ריצה בלי מגש (לבדיקות)")
+    parser.add_argument("--after-update", type=int, default=0,
+                        help="מזהה התהליך הקודם, להמתנה אחרי עדכון")
     args = parser.parse_args(argv)
+
+    if args.after_update:
+        _wait_for_exit(args.after_update)
 
     if already_running():
         port = running_port()
@@ -104,6 +123,7 @@ def main(argv=None):
         open_ui(port)
 
     if args.no_tray:
+        updater.start(lambda: None)
         try:
             while True:
                 time.sleep(3600)
@@ -112,6 +132,13 @@ def main(argv=None):
     else:
         icon = tray.Tray(port, lambda: open_ui(port), None)
         icon.on_quit = icon.stop
+        # יציאה לצורך עדכון היא יציאה מכוונת, ולכן אסור שתיחשב
+        # "המגש נסגר מעצמו" ותגרום להרמה מחדש במקום להחלפת הגרסה.
+        def quit_for_update():
+            icon.quit_requested = True
+            icon.stop()
+
+        updater.start(quit_for_update)
         # מערכת צלצולים לא אמורה להיעלם בשקט. אם לולאת המגש הסתיימה בלי
         # שהמשתמש ביקש לצאת, מרימים אותה מחדש - הצלצולים חשובים יותר
         # מהאייקון, והמנוע והשרת ממשיכים לרוץ בינתיים בכל מקרה.

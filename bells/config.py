@@ -70,6 +70,7 @@ def _defaults():
             "israel": True,
             "erevChagStop": False,       # השבתה כבר מהבוקר בערב חג
             "autostart": False,
+            "autoUpdate": True,
             "startMinimized": True,
             "requirePin": False,
             "pinHash": "",
