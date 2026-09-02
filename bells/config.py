@@ -9,13 +9,14 @@ import sys
 import threading
 import uuid
 
-from . import jewcal
+from . import jewcal, storage
 
 APP_NAME = "BellSystem"
 
 _lock = threading.RLock()
 _data = None
 _data_dir = None
+_mtime = None      # חתימת הקובץ כפי שאנחנו מכירים אותו
 
 CITIES = [
     ("ירושלים", 31.7683, 35.2137, 40),
@@ -88,16 +89,14 @@ def _defaults():
 def data_dir():
     global _data_dir
     if _data_dir is None:
-        override = os.environ.get("BELLSYSTEM_DATA")
-        if override:
-            _data_dir = override
-        elif sys.platform == "win32":
-            _data_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_NAME)
-        else:
-            _data_dir = os.path.join(os.path.expanduser("~"), "." + APP_NAME.lower())
-        os.makedirs(_data_dir, exist_ok=True)
-        os.makedirs(os.path.join(_data_dir, "sounds"), exist_ok=True)
+        _data_dir = storage.resolve()[0]
     return _data_dir
+
+
+def storage_info():
+    """(משותף?, הסבר) - הממשק מציג את זה כשההגדרות אינן משותפות."""
+    path, shared, reason = storage.resolve()
+    return {"path": path, "shared": shared, "reason": reason}
 
 
 def sounds_dir():
@@ -144,8 +143,32 @@ def _seed(data):
     return data
 
 
-def load():
+def _stamp():
+    try:
+        st = os.stat(config_path())
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+def refresh():
+    """טוען מחדש אם משתמש אחר במחשב שינה את הקובץ.
+
+    ההגדרות משותפות בין סשנים, ולכן מופע שלא יבחין בשינוי ימשיך לצלצל
+    לפי לוח ישן. הבדיקה זולה - stat אחד.
+    """
     global _data
+    with _lock:
+        if _data is None:
+            return load()
+        if _stamp() != _mtime:
+            _data = None
+            return load()
+        return _data
+
+
+def load():
+    global _data, _mtime
     with _lock:
         if _data is not None:
             return _data
@@ -164,16 +187,19 @@ def load():
                 except OSError:
                     pass
         _data = data
+        _mtime = _stamp()
         return _data
 
 
 def save():
+    global _mtime
     with _lock:
         path = config_path()
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(_data, fh, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
+        _mtime = _stamp()   # כדי שלא נטען מחדש את הכתיבה של עצמנו
 
 
 def get():

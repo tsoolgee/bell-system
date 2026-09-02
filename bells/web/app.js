@@ -685,10 +685,48 @@ const App = {
     document.getElementById("swAutostart").classList.toggle("on", st.autostart);
     document.getElementById("swMinimized").classList.toggle("on", st.startMinimized);
     document.getElementById("swPower").classList.toggle("on", st.enabled);
+    this.renderMultiUser();
     document.getElementById("pinState").textContent = st.hasPin
       ? "🔐 נעילת מנהל פעילה."
       : "🔓 אין קוד מנהל — כל מי שפותח את המערכת יכול לשנות הגדרות.";
     this.havModeChanged();
+  },
+
+  renderMultiUser() {
+    const st = this.cfg.settings;
+    const store = st.storage || {};
+    const auto = st.autostartInfo || {};
+    const rows = [];
+
+    rows.push(store.shared
+      ? '<div class="notice info">✅ <b>ההגדרות משותפות לכל המשתמשים במחשב.</b><br>' +
+        "לוח הצלצולים, הצלילים וההשבתות זהים לכל מי שמתחבר. הנתונים ב־<code>" +
+        this.esc(store.path) + "</code></div>"
+      : '<div class="notice warn">⚠️ <b>ההגדרות שמורות למשתמש הזה בלבד.</b><br>' +
+        "משתמש אחר שיתחבר למחשב יקבל מערכת ריקה. " + this.esc(store.reason) + "</div>");
+
+    if (auto.scope === "all") {
+      rows.push('<div class="notice info">✅ <b>המערכת עולה לכל משתמש שמתחבר למחשב.</b></div>');
+    } else if (auto.scope === "user") {
+      rows.push('<div class="notice warn">⚠️ <b>ההפעלה האוטומטית רשומה למשתמש הזה בלבד.</b><br>' +
+        "כשמשתמש אחר יתחבר, המערכת לא תעלה אצלו ולא יהיו צלצולים. " +
+        (auto.canSetAllUsers
+          ? "כבו והפעילו את המתג למעלה כדי לרשום אותה לכל המשתמשים."
+          : "הריצו את התוכנה פעם אחת כמנהל (לחיצה ימנית ← „הפעל כמנהל“) ואז הפעילו את המתג.") +
+        "</div>");
+    } else {
+      rows.push('<div class="notice warn">⚠️ <b>ההפעלה האוטומטית כבויה.</b> ' +
+        "אחרי הפעלה מחדש של המחשב לא יהיו צלצולים עד שמישהו יפתח את התוכנה ידנית.</div>");
+    }
+
+    const s2 = this.state || {};
+    const sess = s2.session || {};
+    if (sess.active === false) {
+      rows.push('<div class="notice warn">🔇 <b>המופע הזה אינו זה שמצלצל כרגע.</b><br>' +
+        "משתמש אחר מחובר ויושב מול המסך (סשן " + sess.console + "), ו־Windows מנתב אליו את השמע. " +
+        "אפשר לערוך כאן את הלוח — הצלצולים יישמעו מהסשן הפעיל.</div>");
+    }
+    document.getElementById("multiUser").innerHTML = rows.join("");
   },
 
   havModeChanged() {
@@ -759,9 +797,13 @@ const App = {
     const el = document.getElementById("swAutostart");
     const next = !el.classList.contains("on");
     this.guard(async () => {
-      const res = await this.api("/api/autostart", { json: { enabled: next } });
+      const res = await this.api("/api/autostart", { json: { enabled: next, allUsers: true } });
       el.classList.toggle("on", res.enabled);
-      this.toast(res.enabled ? "המערכת תעלה אוטומטית עם המחשב" : "ההפעלה האוטומטית בוטלה");
+      await this.loadConfig();
+      const scope = (res.info || {}).scope;
+      this.toast(!res.enabled ? "ההפעלה האוטומטית בוטלה"
+        : scope === "all" ? "המערכת תעלה לכל משתמש במחשב"
+        : "נרשם למשתמש הזה בלבד — להרשמה לכולם יש להריץ כמנהל");
     });
   },
 

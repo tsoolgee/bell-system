@@ -157,6 +157,8 @@ class Handler(BaseHTTPRequestHandler):
             st.pop("pinHash", None)
             st.pop("ttsApiKey", None)
             st["autostart"] = autostart.is_enabled()
+            st["autostartInfo"] = autostart.status()
+            st["storage"] = config.storage_info()
             st["hasPin"] = bool(cfg["settings"].get("pinHash"))
             st["hasTtsKey"] = bool(cfg["settings"].get("ttsApiKey"))
             return self._json({
@@ -560,10 +562,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _set_autostart(self, data):
         wanted = bool(data.get("enabled"))
-        ok = autostart.set_enabled(wanted)
-        config.settings()["autostart"] = autostart.is_enabled()
+        info = autostart.set_enabled(wanted, all_users=bool(data.get("allUsers", True)))
+        config.settings()["autostart"] = info["enabled"]
         config.save()
-        return self._json({"ok": ok, "enabled": autostart.is_enabled()})
+        engine.log("הפעלה אוטומטית: %s (%s)" %
+                   ("פעילה" if info["enabled"] else "כבויה", info["scope"] or "-"), "system")
+        return self._json({"ok": info["enabled"] == wanted, "enabled": info["enabled"],
+                           "info": info})
 
     def _restore(self):
         raw = self._body()

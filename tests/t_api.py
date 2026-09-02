@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """בדיקת קצה-לקצה מול השרת הרץ."""
+import datetime
 import json
 import os
 import sys
@@ -64,18 +65,25 @@ check("הרשימה ממוינת לפי שעה",
       [b["time"] for b in cfg["bells"]] == sorted(b["time"] for b in cfg["bells"]))
 
 print("--- השבתות ---")
+# מתחילים ביום ראשון הקרוב: טווח יחסי כדי שהבדיקה לא תתיישן, ובלי שבת
+# בתוכו - שבת גוברת על השבתה ידנית, ואז הסיבה שתדווח תהיה "שבת".
+TODAY = datetime.date.today()
+_sunday = TODAY + datetime.timedelta(days=(6 - TODAY.weekday()) % 7 or 7)
+RANGE = [_sunday + datetime.timedelta(days=i) for i in (0, 1, 2)]
 code, res = call("/api/exceptions/save", {"name": "חופשת בדיקה", "type": "gregorian",
-                                          "from": "2026-09-01", "to": "2026-09-03"})
+                                          "from": RANGE[0].isoformat(),
+                                          "to": RANGE[-1].isoformat()})
 check("יצירת השבתה לועזית", code == 200, res)
 exc_id = res.get("exception", {}).get("id")
 
 code, res = call("/api/exceptions/save", {"name": "הפוך", "type": "gregorian",
-                                          "from": "2026-09-05", "to": "2026-09-01"})
+                                          "from": RANGE[-1].isoformat(),
+                                          "to": RANGE[0].isoformat()})
 check("טווח הפוך נדחה", code == 400, res)
 
 code, res = call("/api/calendar?days=10")
-rows = {d["date"]: d for d in res["days"]}
-blocked = [d for d in res["days"] if d["date"] in ("01/09/2026", "02/09/2026", "03/09/2026")]
+wanted = {d.strftime("%d/%m/%Y") for d in RANGE}
+blocked = [d for d in res["days"] if d["date"] in wanted]
 check("ההשבתה חוסמת את הימים",
       len(blocked) == 3 and all(d["blocked"] and d["reason"] == "חופשת בדיקה" for d in blocked),
       blocked)
@@ -87,7 +95,9 @@ check("יצירת השבתה עברית", code == 200, res)
 heb_id = res.get("exception", {}).get("id")
 
 print("--- צלילים ---")
-wav = open(os.path.join(os.environ["APPDATA"], "BellSystem", "sounds", "chime.wav"), "rb").read()
+# מהתיקייה שהשרת עצמו מדווח עליה, לא מנתיב מנוחש
+_, _cfg = call("/api/config")
+wav = open(os.path.join(_cfg["dataDir"], "sounds", "chime.wav"), "rb").read()
 code, res = call("/api/sounds/upload?name=" + urllib.parse.quote("צלצול בדיקה.wav"), raw=wav)
 check("העלאת צליל", code == 200 and res.get("ok"), res)
 sound_id = res.get("sound", {}).get("id")

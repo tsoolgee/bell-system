@@ -18,13 +18,15 @@ _mutex = None
 
 
 def _mutex_name():
-    """הנעילה היא על תצורה, לא על המחשב.
+    """מופע אחד לכל סשן, לא אחד לכל המחשב.
 
-    שני מופעים שחולקים את אותה תיקיית נתונים ייאבקו על אותו config ואותם
-    צלצולים. מופע שמצביע על תיקייה אחרת הוא התקנה נפרדת ולגיטימית.
+    כשיש כמה משתמשי Windows על אותו מחשב, כל סשן צריך מופע משלו: רק
+    המופע שיושב מול המסך מקבל ניתוב שמע, ולכן רק הוא יכול לצלצל.
+    התחילית Local היא מרחב שמות לכל סשן; שני מופעים באותו סשן עדיין
+    נחסמים, וזה מה שהנעילה נועדה למנוע.
     """
     digest = hashlib.sha256(config.data_dir().lower().encode("utf-8")).hexdigest()[:16]
-    return "Global\\BellSystemSingleInstance_" + digest
+    return "Local\\BellSystemSingleInstance_" + digest
 
 
 def already_running():

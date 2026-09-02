@@ -32,6 +32,8 @@ jobs:
           python tests/t_audio.py
           python tests/t_tts.py
           python tests/t_tray_restart.py
+          python tests/t_upgrade.py
+          python tests/t_multiuser.py
 
       - name: Build EXE
         run: python build.py

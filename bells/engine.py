@@ -7,7 +7,7 @@ import threading
 import time
 import traceback
 
-from . import audio, config, jewcal, schedule, sounds
+from . import audio, config, jewcal, schedule, sounds, storage
 
 # חלון החסד: צלצול שהגיע זמנו יופעל רק אם לא עברו יותר מכך שניות
 # (כדי שצלצולים ישנים לא "יתפרצו" אחרי שהמחשב חוזר משינה).
@@ -85,8 +85,14 @@ def ring(sound_id, duration=5, label="", manual=False):
 
 
 def _tick(now):
+    # משתמש אחר במחשב אולי שינה את הלוח מהסשן שלו
+    config.refresh()
     st = config.settings()
     verdict = schedule.evaluate(now)
+    # רק המופע שיושב מול המסך מצלצל. סשן מנותק לא מקבל ניתוב שמע
+    # ב-Windows, ואם גם הוא היה מצלצל אף אחד לא היה שומע - ובמקביל
+    # היינו מסמנים את הצלצול כאילו הופעל.
+    on_console = storage.is_active_session()
     today = now.date()
     for bell in schedule.bells_for_day(today):
         key = (today.isoformat(), bell["id"])
@@ -96,6 +102,8 @@ def _tick(now):
         delta = (now - when).total_seconds()
         if delta < 0 or delta > GRACE_SECONDS:
             continue
+        if not on_console:
+            continue   # לא מסמנים כבוצע - המופע הפעיל יטפל בזה
         _fired.add(key)
         if verdict["blocked"]:
             log("צלצול %s (%s) לא הופעל - %s" % (bell.get("time"), bell.get("label") or "",
@@ -148,6 +156,12 @@ def status():
     nxt = schedule.next_bell(now)
     window = schedule.next_holy_window(now, st)
     out = {
+        "session": {
+            "id": storage.current_session(),
+            "active": storage.is_active_session(),
+            "console": storage.active_console_session(),
+        },
+        "storage": config.storage_info(),
         "now": now.isoformat(timespec="seconds"),
         "time": now.strftime("%H:%M:%S"),
         "date": now.strftime("%d/%m/%Y"),
