@@ -57,14 +57,31 @@ check("ארגומנט לא חוקי נדחה", out.returncode != 0)
 check("argparse מסביר מה מותר",
       b"elevated-task" in (out.stderr or b""), (out.stderr or b"")[:120])
 
-# משימה תקינה בלי הרשאות מנהל: אמורה להיכשל בנקי ולא לקרוס
-out = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"),
-                      "--elevated-task", "wake-off"],
-                     capture_output=True, cwd=ROOT, timeout=90)
-check("משימה תקינה רצה ומסתיימת בלי קריסה",
-      out.returncode in (0, 1), (out.returncode, (out.stderr or b"")[:200]))
-check("המשימה לא הפעילה שרת או מגש",
-      b"Traceback" not in (out.stderr or b""), (out.stderr or b"")[:200])
+# משימה תקינה: רצה, מסתיימת, ולא מרימה שרת או מגש.
+# powercfg עשוי להצליח גם בלי הרשאות מנהל, ולכן הבדיקה שומרת את הערכים
+# מראש ומחזירה אותם - בדיקה לא אמורה להשאיר את המחשב משונה.
+from bells import wake  # noqa: E402
+
+before_ac, before_dc = wake.timers_allowed(both=True)
+try:
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"),
+                          "--elevated-task", "wake-off"],
+                         capture_output=True, cwd=ROOT, timeout=90)
+    check("משימה תקינה רצה ומסתיימת בלי קריסה",
+          out.returncode in (0, 1), (out.returncode, (out.stderr or b"")[:200]))
+    check("המשימה לא הפעילה שרת או מגש",
+          b"Traceback" not in (out.stderr or b""), (out.stderr or b"")[:200])
+finally:
+    if before_ac is not None:
+        for verb, value in (("/setacvalueindex", before_ac), ("/setdcvalueindex", before_dc)):
+            wake._powercfg([verb, "SCHEME_CURRENT", wake.SUB_SLEEP,
+                            wake.ALLOW_WAKE_TIMERS, str(value)])
+        wake._powercfg(["/setactive", "SCHEME_CURRENT"])
+
+after_ac, after_dc = wake.timers_allowed(both=True)
+check("הבדיקה החזירה את הגדרות החשמל לקדמותן",
+      (after_ac, after_dc) == (before_ac, before_dc),
+      ((before_ac, before_dc), (after_ac, after_dc)))
 
 print()
 print("נכשלו: %d" % len(fails))
