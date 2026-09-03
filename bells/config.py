@@ -71,6 +71,8 @@ def _defaults():
             "erevChagStop": False,       # השבתה כבר מהבוקר בערב חג
             "autostart": False,
             "autoUpdate": True,
+            "wakeFromSleep": True,
+            "wakeLeadSeconds": 60,
             "startMinimized": True,
             "requirePin": False,
             "pinHash": "",

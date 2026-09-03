@@ -190,6 +190,15 @@
         </div>
 
         <div class="card">
+          <h2>😴 מצב שינה <span class="sub">שהצלצול יעיר את המחשב</span></h2>
+          <div class="toggle">
+            <div class="txt"><b>להעיר את המחשב לקראת צלצול</b><small>Windows יעיר את המחשב דקה לפני כל צלצול</small></div>
+            <div class="switch" id="swWake" onclick="App.toggleSwitch('swWake','wakeFromSleep')"></div>
+          </div>
+          <div id="wakeState" style="margin-top:14px"></div>
+        </div>
+
+        <div class="card">
           <h2>⬆️ עדכוני גרסה <span class="sub" id="verLabel"></span></h2>
           <div class="toggle">
             <div class="txt"><b>עדכון אוטומטי</b><small>מתקין גרסה חדשה לבד, רק כשאין צלצול בטווח 20 דקות</small></div>

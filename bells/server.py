@@ -16,7 +16,7 @@ import urllib.parse
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import audio, autostart, config, engine, jewcal, outdev, schedule, tts, updater
+from . import audio, autostart, config, engine, jewcal, outdev, schedule, tts, updater, wake
 
 MAX_UPLOAD = 25 * 1024 * 1024
 ALLOWED_AUDIO = {".mp3", ".wav", ".m4a", ".ogg", ".wma", ".aac"}
@@ -298,6 +298,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/autostart": self._set_autostart,
             "/api/update/check": self._check_update,
             "/api/update/install": self._install_update,
+            "/api/wake": self._set_wake_timers,
             "/api/tts/key": self._set_tts_key,
             "/api/tts/create": self._create_announcement,
         }
@@ -312,6 +313,7 @@ class Handler(BaseHTTPRequestHandler):
     def _set_settings(self, data):
         st = config.settings()
         allowed = {"volume", "outputDevice", "autoUpdate",
+                   "wakeFromSleep", "wakeLeadSeconds",
                    "city", "lat", "lon", "candleMinutes", "havdalahMode",
                    "havdalahMinutes", "havdalahDegrees", "shabbatEnabled", "holidaysAuto",
                    "israel", "erevChagStop", "startMinimized",
@@ -564,6 +566,19 @@ class Handler(BaseHTTPRequestHandler):
         config.save()
         engine.log("נוצר כרוז: " + snd["name"], "system")
         return self._json({"ok": True, "sound": snd})
+
+    def _set_wake_timers(self, data):
+        """מאפשר טיימרים להערה בתוכנית החשמל. דורש הרשאת מנהל."""
+        wanted = bool(data.get("enabled"))
+        ok = wake.set_timers_allowed(wanted)
+        st = wake.status()
+        engine.log("טיימרים להערה: %s" % ("אופשרו" if st.get("allowed") else "כבויים"),
+                   "system")
+        if not ok:
+            return self._json({"ok": False, "wake": st,
+                               "error": "שינוי תוכנית החשמל דורש הרשאת מנהל. "
+                                        "הריצו את התוכנה כמנהל ונסו שוב."}, 200)
+        return self._json({"ok": True, "wake": st})
 
     def _check_update(self, data):
         return self._json(updater.check())

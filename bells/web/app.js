@@ -103,6 +103,9 @@ const App = {
     this.renderNext();
     this.renderToday();
     this.renderKiosk();
+    if (document.getElementById("view-settings").classList.contains("active")) {
+      this.renderWake();
+    }
   },
 
   /* ---------------- מצב ותצוגה ראשית ---------------- */
@@ -686,11 +689,60 @@ const App = {
     document.getElementById("swMinimized").classList.toggle("on", st.startMinimized);
     document.getElementById("swPower").classList.toggle("on", st.enabled);
     this.renderMultiUser();
+    this.renderWake();
     this.loadUpdate();
     document.getElementById("pinState").textContent = st.hasPin
       ? "🔐 נעילת מנהל פעילה."
       : "🔓 אין קוד מנהל — כל מי שפותח את המערכת יכול לשנות הגדרות.";
     this.havModeChanged();
+  },
+
+  renderWake() {
+    const st = this.state || {};
+    const w = st.wake || {};
+    document.getElementById("swWake").classList.toggle("on", !!w.enabled);
+    const box = document.getElementById("wakeState");
+    if (!box) return;
+    const rows = [];
+
+    if (!w.supported) {
+      rows.push('<div class="notice warn">המחשב הזה אינו מדווח על מצב שינה שאפשר להתעורר ממנו.</div>');
+    } else if (!w.enabled) {
+      rows.push('<div class="notice info">כבוי. אם המחשב יירדם, צלצולים שנופלים בזמן השינה לא יושמעו.</div>');
+    } else if (w.allowed === 0) {
+      rows.push('<div class="notice warn">⚠️ <b>Windows חוסם טיימרים להערה</b> בתוכנית החשמל, ' +
+        'ולכן ההערה לא תעבוד.<br><button class="btn primary" style="margin-top:8px" ' +
+        'onclick="App.enableWakeTimers()">אפשר טיימרים להערה</button></div>');
+    } else if (w.allowed === null) {
+      rows.push('<div class="notice info">לא ניתן לברר את הגדרת תוכנית החשמל. ' +
+        "ההערה תיקבע בכל מקרה.</div>");
+    } else {
+      rows.push('<div class="notice info">✅ מופעל' +
+        (w.armedAt ? ", ההערה הקרובה ב־<b>" + w.armedAt + "</b>" : ", אין צלצול מתוכנן להעיר אליו") +
+        " (" + w.lead + " שניות לפני הצלצול)." +
+        (w.allowed === 2 ? " Windows מוגדר ל„טיימרים חשובים בלבד“ — ייתכן שההערה לא תעבוד." : "") +
+        "</div>");
+    }
+    if (w.allowedBattery === 0 && w.enabled) {
+      rows.push('<div class="notice warn">בסוללה Windows חוסם טיימרים להערה. ' +
+        "במחשב נייד כדאי להשאיר אותו מחובר לחשמל.</div>");
+    }
+    rows.push('<div class="notice info">חשוב: אי אפשר להעיר מחשב <b>כבוי</b> — ' +
+      "רק משינה או מתרדמת. את המחשב שמפעיל את הצלצולים לא כדאי לכבות.</div>");
+    box.innerHTML = rows.join("");
+  },
+
+  enableWakeTimers() {
+    this.guard(async () => {
+      const res = await this.api("/api/wake", { json: { enabled: true } });
+      if (res.ok) {
+        this.toast("טיימרים להערה אופשרו");
+      } else {
+        this.toast(res.error || "לא ניתן לשנות את תוכנית החשמל", true);
+      }
+      await this.refresh();
+      this.renderWake();
+    });
   },
 
   async loadUpdate() {

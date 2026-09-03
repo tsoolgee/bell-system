@@ -19,6 +19,7 @@ _fired = set()
 _log = []
 _log_lock = threading.Lock()
 _listeners = []
+_armed_for = None       # המועד שהטיימר להערה כבר כוון אליו
 
 
 def log(message, kind="info"):
@@ -118,16 +119,54 @@ def _cleanup_fired(now):
         _fired.discard(key)
 
 
+def _arm_wake():
+    """מכוון את הטיימר שיעיר את המחשב לקראת הצלצול הבא."""
+    global _armed_for
+    from . import wake       # ייבוא מושהה: wake מייבא את engine
+    st = config.settings()
+    if not st.get("wakeFromSleep", True) or not storage.is_active_session():
+        if _armed_for is not None:
+            wake.cancel()
+            _armed_for = None
+        return
+    nxt = schedule.next_bell()
+    target = nxt["at"] if nxt else None
+    if target == _armed_for:
+        return
+    _armed_for = target
+    if target is None:
+        wake.cancel()
+        return
+    at = wake.arm(target, int(st.get("wakeLeadSeconds", 60)))
+    if at:
+        log("הערה מתוכננת ל-%s לקראת הצלצול ב-%s"
+            % (at.strftime("%H:%M"), target.strftime("%H:%M")), "system")
+
+
 def _loop():
+    global _armed_for
     log("המערכת עלתה", "system")
+    from . import wake
+    wake.start()
     last_cleanup = None
+    last_tick = None
     while not _stop.is_set():
         try:
             now = datetime.datetime.now().astimezone()
+            # פער גדול בין טיקים אומר שהמחשב ישן. אחרי הערה התקני השמע
+            # נספרים מחדש ב-Windows, ולכן המיקסר חייב להתאתחל מחדש לפני
+            # הצלצול הראשון - אחרת הוא היה יוצא להתקן שכבר לא תקף.
+            if last_tick is not None and (now - last_tick).total_seconds() > 120:
+                minutes = (now - last_tick).total_seconds() / 60
+                log("המערכת חזרה לפעולה אחרי %d דקות" % minutes, "system")
+                audio.reset()
+                _armed_for = None
+            last_tick = now
             _tick(now)
             if last_cleanup != now.date():
                 _cleanup_fired(now)
                 last_cleanup = now.date()
+            _arm_wake()
         except Exception:
             log("שגיאה במנוע: " + traceback.format_exc(limit=2), "error")
         _stop.wait(0.5)
@@ -148,6 +187,18 @@ def shutdown():
     audio.stop()
 
 
+def _wake_status():
+    try:
+        from . import wake
+        data = wake.status()
+    except Exception:
+        data = {"supported": False, "allowed": None, "armedAt": None}
+    st = config.settings()
+    data["enabled"] = bool(st.get("wakeFromSleep", True))
+    data["lead"] = int(st.get("wakeLeadSeconds", 60))
+    return data
+
+
 def status():
     """מצב המערכת המלא - מה שהממשק והמגש מציגים."""
     now = datetime.datetime.now().astimezone()
@@ -162,6 +213,7 @@ def status():
             "console": storage.active_console_session(),
         },
         "storage": config.storage_info(),
+        "wake": _wake_status(),
         "now": now.isoformat(timespec="seconds"),
         "time": now.strftime("%H:%M:%S"),
         "date": now.strftime("%d/%m/%Y"),

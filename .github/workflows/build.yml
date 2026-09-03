@@ -44,6 +44,7 @@ jobs:
           python tests/t_upgrade.py
           python tests/t_multiuser.py
           python tests/t_update.py
+          python tests/t_wake.py
 
       - name: Build EXE
         run: python build.py

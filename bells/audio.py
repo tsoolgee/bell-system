@@ -300,6 +300,32 @@ def _on_worker(fn, timeout=25):
     return out[0] if out else None
 
 
+def reset():
+    """זורק את המיקסר כדי שההשמעה הבאה תאתחל אותו מחדש.
+
+    אחרי חזרה משינה התקני השמע נספרים מחדש ב-Windows, וההתקן שהמיקסר
+    אחז בו כבר לא בהכרח תקף. בלי אתחול מחדש הצלצול הראשון אחרי ההערה
+    היה יוצא לשום מקום.
+    """
+    global _active_device
+    stop()
+
+    def drop():
+        global _active_device
+        pygame = _pygame()
+        if pygame is None:
+            return True
+        with _mixer_lock:
+            try:
+                pygame.mixer.quit()
+            except Exception:
+                pass
+            _active_device = None
+        return True
+
+    _on_worker(drop, timeout=15)
+
+
 def stop():
     """עצירה מיידית של הצלצול הנוכחי."""
     _ensure_worker()
