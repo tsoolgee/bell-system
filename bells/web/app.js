@@ -712,7 +712,9 @@ const App = {
     } else if (w.allowed === 0) {
       rows.push('<div class="notice warn">⚠️ <b>Windows חוסם טיימרים להערה</b> בתוכנית החשמל, ' +
         'ולכן ההערה לא תעבוד.<br><button class="btn primary" style="margin-top:8px" ' +
-        'onclick="App.enableWakeTimers()">אפשר טיימרים להערה</button></div>');
+        'onclick="App.enableWakeTimers()">אפשר טיימרים להערה' +
+        ((this.cfg && this.cfg.settings.isAdmin) ? "" : " (יבקש הרשאת מנהל)") +
+        "</button></div>");
     } else if (w.allowed === null) {
       rows.push('<div class="notice info">לא ניתן לברר את הגדרת תוכנית החשמל. ' +
         "ההערה תיקבע בכל מקרה.</div>");
@@ -730,6 +732,30 @@ const App = {
     rows.push('<div class="notice info">חשוב: אי אפשר להעיר מחשב <b>כבוי</b> — ' +
       "רק משינה או מתרדמת. את המחשב שמפעיל את הצלצולים לא כדאי לכבות.</div>");
     box.innerHTML = rows.join("");
+  },
+
+  shareData() {
+    this.guard(async () => {
+      this.toast("מבקש הרשאת מנהל…");
+      const res = await this.api("/api/share-data", { json: {} });
+      if (res.ok) {
+        await this.loadConfig();
+        this.toast("ההגדרות משותפות עכשיו לכל המשתמשים");
+      } else {
+        this.toast(res.error || "לא בוצע", true);
+      }
+    });
+  },
+
+  autostartAllUsers() {
+    this.guard(async () => {
+      this.toast("מבקש הרשאת מנהל…");
+      const res = await this.api("/api/autostart", { json: { enabled: true, allUsers: true } });
+      await this.loadConfig();
+      const scope = (res.info || {}).scope;
+      this.toast(scope === "all" ? "נרשם לכל המשתמשים במחשב"
+        : (res.note || "נרשם למשתמש הזה בלבד"), scope !== "all");
+    });
   },
 
   enableWakeTimers() {
@@ -821,17 +847,17 @@ const App = {
         "לוח הצלצולים, הצלילים וההשבתות זהים לכל מי שמתחבר. הנתונים ב־<code>" +
         this.esc(store.path) + "</code></div>"
       : '<div class="notice warn">⚠️ <b>ההגדרות שמורות למשתמש הזה בלבד.</b><br>' +
-        "משתמש אחר שיתחבר למחשב יקבל מערכת ריקה. " + this.esc(store.reason) + "</div>");
+        "משתמש אחר שיתחבר למחשב יקבל מערכת ריקה." +
+        '<br><button class="btn primary" style="margin-top:8px" onclick="App.shareData()">' +
+        "🔓 שתף לכל המשתמשים" + (st.isAdmin ? "" : " (יבקש הרשאת מנהל)") + "</button></div>");
 
     if (auto.scope === "all") {
       rows.push('<div class="notice info">✅ <b>המערכת עולה לכל משתמש שמתחבר למחשב.</b></div>');
     } else if (auto.scope === "user") {
       rows.push('<div class="notice warn">⚠️ <b>ההפעלה האוטומטית רשומה למשתמש הזה בלבד.</b><br>' +
         "כשמשתמש אחר יתחבר, המערכת לא תעלה אצלו ולא יהיו צלצולים. " +
-        (auto.canSetAllUsers
-          ? "כבו והפעילו את המתג למעלה כדי לרשום אותה לכל המשתמשים."
-          : "הריצו את התוכנה פעם אחת כמנהל (לחיצה ימנית ← „הפעל כמנהל“) ואז הפעילו את המתג.") +
-        "</div>");
+        '<br><button class="btn primary" style="margin-top:8px" onclick="App.autostartAllUsers()">' +
+        "🔓 רשום לכל המשתמשים" + (st.isAdmin ? "" : " (יבקש הרשאת מנהל)") + "</button></div>");
     } else {
       rows.push('<div class="notice warn">⚠️ <b>ההפעלה האוטומטית כבויה.</b> ' +
         "אחרי הפעלה מחדש של המחשב לא יהיו צלצולים עד שמישהו יפתח את התוכנה ידנית.</div>");

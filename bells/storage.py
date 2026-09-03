@@ -77,6 +77,32 @@ def _migrate(src, dst):
         return False
 
 
+def prepare_shared():
+    """יוצר את התיקייה המשותפת ונותן הרשאה לכל המשתמשים.
+
+    נקרא מתוך התהליך המורם: יצירת התיקייה תחת ProgramData והענקת Modify
+    לקבוצת Users הן פעולות שדורשות מנהל, ובלעדיהן כל משתמש היה מקבל
+    הגדרות משלו.
+    """
+    shared = _shared_dir()
+    try:
+        os.makedirs(os.path.join(shared, "sounds"), exist_ok=True)
+    except OSError:
+        return False
+    _grant_all_users(shared)
+    if not _writable(shared):
+        return False
+    _migrate(_per_user_dir(), shared)
+    return True
+
+
+def reset():
+    """שוכח את ההחלטה, כדי לזהות מחדש אחרי שההרשאות השתנו."""
+    global _resolved, _shared, _reason
+    _resolved = _shared = None
+    _reason = ""
+
+
 def resolve():
     """מחזיר (נתיב, האם משותף, הסבר). מחושב פעם אחת."""
     global _resolved, _shared, _reason

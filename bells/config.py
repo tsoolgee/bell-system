@@ -96,6 +96,21 @@ def data_dir():
     return _data_dir
 
 
+def reset_location():
+    """שוכח היכן הנתונים, כדי לזהות מחדש אחרי שההרשאות השתנו.
+
+    אחרי שהתיקייה המשותפת נוצרה בהרשאות מנהל, המופע הרגיל צריך לעבור
+    אליה מיד - בלי לדרוש מהמנהל להפעיל מחדש.
+    """
+    global _data_dir, _data, _mtime
+    with _lock:
+        storage.reset()
+        _data_dir = None
+        _data = None
+        _mtime = None
+    return data_dir()
+
+
 def storage_info():
     """(משותף?, הסבר) - הממשק מציג את זה כשההגדרות אינן משותפות."""
     path, shared, reason = storage.resolve()

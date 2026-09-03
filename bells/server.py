@@ -16,7 +16,8 @@ import urllib.parse
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import audio, autostart, config, engine, jewcal, outdev, schedule, tts, updater, wake
+from . import (audio, autostart, config, elevate, engine, jewcal, outdev, schedule,
+               sounds, storage, tts, updater, wake)
 
 MAX_UPLOAD = 25 * 1024 * 1024
 ALLOWED_AUDIO = {".mp3", ".wav", ".m4a", ".ogg", ".wma", ".aac"}
@@ -159,6 +160,7 @@ class Handler(BaseHTTPRequestHandler):
             st["autostart"] = autostart.is_enabled()
             st["autostartInfo"] = autostart.status()
             st["storage"] = config.storage_info()
+            st["isAdmin"] = elevate.is_admin()
             st["hasPin"] = bool(cfg["settings"].get("pinHash"))
             st["hasTtsKey"] = bool(cfg["settings"].get("ttsApiKey"))
             return self._json({
@@ -299,6 +301,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/update/check": self._check_update,
             "/api/update/install": self._install_update,
             "/api/wake": self._set_wake_timers,
+            "/api/share-data": self._share_data,
             "/api/tts/key": self._set_tts_key,
             "/api/tts/create": self._create_announcement,
         }
@@ -567,18 +570,44 @@ class Handler(BaseHTTPRequestHandler):
         engine.log("נוצר כרוז: " + snd["name"], "system")
         return self._json({"ok": True, "sound": snd})
 
+    def _elevated(self, task, direct):
+        """מבצע פעולה שדורשת מנהל: ישירות אם אפשר, אחרת מבקש הרשאה.
+
+        מחזיר (הצליח, הודעה). המשתמש רואה חלון הרשאות אחד, במקום הנחיה
+        להריץ את כל התוכנה מחדש כמנהל.
+        """
+        if elevate.is_admin():
+            return bool(direct()), ""
+        ok, message = elevate.run_elevated(task)
+        return ok, message
+
     def _set_wake_timers(self, data):
         """מאפשר טיימרים להערה בתוכנית החשמל. דורש הרשאת מנהל."""
         wanted = bool(data.get("enabled"))
-        ok = wake.set_timers_allowed(wanted)
+        task = "wake-on" if wanted else "wake-off"
+        ok, message = self._elevated(task, lambda: wake.set_timers_allowed(wanted))
         st = wake.status()
         engine.log("טיימרים להערה: %s" % ("אופשרו" if st.get("allowed") else "כבויים"),
                    "system")
         if not ok:
             return self._json({"ok": False, "wake": st,
-                               "error": "שינוי תוכנית החשמל דורש הרשאת מנהל. "
-                                        "הריצו את התוכנה כמנהל ונסו שוב."}, 200)
+                               "error": message or "לא ניתן לשנות את תוכנית החשמל"})
         return self._json({"ok": True, "wake": st})
+
+    def _share_data(self, data):
+        """מעביר את ההגדרות לתיקייה משותפת לכל משתמשי המחשב."""
+        info = config.storage_info()
+        if info["shared"]:
+            return self._json({"ok": True, "storage": info})
+        ok, message = self._elevated("share-data", storage.prepare_shared)
+        if not ok:
+            return self._json({"ok": False, "storage": info,
+                               "error": message or "לא ניתן ליצור תיקייה משותפת"})
+        config.reset_location()
+        sounds.ensure(config.sounds_dir())
+        new = config.storage_info()
+        engine.log("ההגדרות עברו לתיקייה משותפת: %s" % new["path"], "system")
+        return self._json({"ok": new["shared"], "storage": new})
 
     def _check_update(self, data):
         return self._json(updater.check())
@@ -602,14 +631,31 @@ class Handler(BaseHTTPRequestHandler):
             os._exit(0)   # התהליך החדש כבר עלה וממתין לשחרור הנעילה
 
     def _set_autostart(self, data):
+        """רישום לכל המשתמשים נוגע ב-HKLM ולכן דורש מנהל.
+
+        אם ההרשאה לא ניתנה, עדיין רושמים למשתמש הנוכחי - עדיף שהמערכת
+        תעלה למי שהתקין אותה מאשר שלא תעלה לאיש - ומדווחים מה יצא בפועל.
+        """
         wanted = bool(data.get("enabled"))
-        info = autostart.set_enabled(wanted, all_users=bool(data.get("allUsers", True)))
+        all_users = bool(data.get("allUsers", True))
+        note = ""
+
+        if not wanted:
+            info = autostart.set_enabled(False)
+        elif elevate.is_admin() or not all_users:
+            info = autostart.set_enabled(True, all_users=all_users)
+        else:
+            ok, note = elevate.run_elevated("autostart-on")
+            info = autostart.status()
+            if not info["enabled"]:
+                info = autostart.set_enabled(True, all_users=False)
+
         config.settings()["autostart"] = info["enabled"]
         config.save()
         engine.log("הפעלה אוטומטית: %s (%s)" %
                    ("פעילה" if info["enabled"] else "כבויה", info["scope"] or "-"), "system")
         return self._json({"ok": info["enabled"] == wanted, "enabled": info["enabled"],
-                           "info": info})
+                           "info": info, "note": note})
 
     def _restore(self):
         raw = self._body()

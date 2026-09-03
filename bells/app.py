@@ -12,7 +12,7 @@ import time
 import urllib.request
 import webbrowser
 
-from . import config, engine, server, sounds, tray, updater
+from . import config, elevate, engine, server, sounds, tray, updater
 
 _mutex = None
 
@@ -101,7 +101,13 @@ def main(argv=None):
     parser.add_argument("--no-tray", action="store_true", help="ריצה בלי מגש (לבדיקות)")
     parser.add_argument("--after-update", type=int, default=0,
                         help="מזהה התהליך הקודם, להמתנה אחרי עדכון")
+    parser.add_argument("--elevated-task", choices=elevate.TASKS,
+                        help="פעולה בודדת שדורשת הרשאות מנהל")
     args = parser.parse_args(argv)
+
+    if args.elevated_task:
+        # תהליך קצר ומורם: מבצע פעולה אחת ונסגר, בלי מגש ובלי שרת
+        return 0 if elevate.perform(args.elevated_task) else 1
 
     if args.after_update:
         _wait_for_exit(args.after_update)
