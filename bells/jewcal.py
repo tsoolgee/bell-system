@@ -25,6 +25,7 @@ HOLIDAY_CATALOG = [
     ("17 of Tamuz",   "י\"ז בתמוז",    False),
     ("9 of Av",       "ט' באב",        False),
     ("Tu B'shvat",    "ט\"ו בשבט",     False),
+    ("Purim Katan",   "פורים קטן",     False),
     ("Lag Ba'omer",   "ל\"ג בעומר",    False),
     ("Pesach Sheni",  "פסח שני",       False),
     ("Tu B'av",       "ט\"ו באב",      False),
