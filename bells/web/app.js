@@ -683,7 +683,7 @@ const App = {
     document.getElementById("setHavMin").value = st.havdalahMinutes;
     document.getElementById("setHavDeg").value = st.havdalahDegrees;
     document.getElementById("setVolume").value = st.volume;
-    document.getElementById("volLabel").textContent = st.volume + "%";
+    this.volumeMoved(st.volume);
     document.getElementById("dataDir").textContent = this.cfg.dataDir;
     document.getElementById("swAutostart").classList.toggle("on", st.autostart);
     document.getElementById("swMinimized").classList.toggle("on", st.startMinimized);
@@ -888,6 +888,43 @@ const App = {
     document.getElementById("setCandle").value = city.candle;
   },
 
+  volumeMoved(value) {
+    const percent = Number(value);
+    document.getElementById("volLabel").textContent = percent + "%";
+    // מעל 100% אין יותר מקום בזרם עצמו, ולכן זו הגברה על הצליל. אומרים
+    // את זה במקום שבו מזיזים את המחוון, ולא רק בעזרה.
+    document.getElementById("volHint").textContent =
+      percent > 100 ? "· מוגבר, בדקו שזה נשמע טוב" : (percent === 0 ? "· שקט" : "");
+  },
+
+  saveVolume() {
+    const volume = Number(document.getElementById("setVolume").value);
+    this.guard(async () => {
+      await this.api("/api/settings", { json: { volume } });
+      await this.loadConfig();
+      await this.api("/api/ring", { json: { sound: "bell_classic", duration: 2 } });
+      this.toast("עוצמת הצלצול: " + volume + "%");
+    });
+  },
+
+  saveDeviceVolume(value) {
+    const volume = Number(value);
+    this.guard(async () => {
+      const res = await this.api("/api/audio/device-volume", { json: { volume } });
+      await this.loadAudioDevice();
+      // מדווחים את מה שההתקן החזיר, לא את מה שביקשנו
+      this.toast("עוצמת ההתקן: " + res.volume + "%");
+    });
+  },
+
+  unmuteDevice() {
+    this.guard(async () => {
+      await this.api("/api/audio/device-volume", { json: { muted: false } });
+      await this.loadAudioDevice();
+      this.toast("ההשתקה בוטלה");
+    });
+  },
+
   saveSettings() {
     this.guard(async () => {
       await this.api("/api/settings", {
@@ -999,6 +1036,16 @@ const App = {
       field.hidden = true;
     }
 
+    // עוצמת ההתקן עצמו - רק כשאפשר באמת לקרוא ולשנות אותה
+    const volField = document.getElementById("deviceVolumeField");
+    const volActions = document.getElementById("deviceVolumeActions");
+    volField.hidden = volActions.hidden = !info.available;
+    if (info.available) {
+      document.getElementById("setDeviceVolume").value = info.volume;
+      document.getElementById("devVolLabel").textContent = info.volume + "%";
+      document.getElementById("unmuteBtn").hidden = !info.muted;
+    }
+
     const box = document.getElementById("audioDevice");
     if (!info.available) {
       box.innerHTML = info.selected
@@ -1079,6 +1126,93 @@ const App = {
         button.textContent = "▶️ בדיקת שמע";
       }
     });
+  },
+
+  testBoost() {
+    const button = document.getElementById("boostTestBtn");
+    const result = document.getElementById("audioTestResult");
+    button.classList.add("loading");
+    button.textContent = "⏳ מודד…";
+    result.innerHTML = "";
+    this.guard(async () => {
+      try {
+        const res = await this.api("/api/audio/boost-test", { json: {} });
+        await this.loadAudioDevice();
+        result.innerHTML = this.boostReport(res);
+      } finally {
+        button.classList.remove("loading");
+        button.textContent = "📈 בדיקת הגברה";
+      }
+    });
+  },
+
+  boostReport(res) {
+    const dev = res.device || {};
+    const sam = res.samples || {};
+    const meter = res.meter || {};
+    const silenced = dev.muted || dev.volume === 0;
+    const gainDb = typeof sam.db === "number" ? sam.db : null;
+    const lines = [];
+    let head, tone;
+
+    if (silenced) {
+      tone = "warn";
+      head = "⚠️ ההתקן " + (dev.muted ? "מושתק" : "בעוצמה 0%") +
+        " — שום הגברה לא תישמע ממנו כל עוד זה המצב.";
+    } else if (res.volume <= 100) {
+      tone = "info";
+      head = "העוצמה מוגדרת על " + res.volume + "% — אין הגברה לבדוק. " +
+        (res.heard ? "האות יוצא כרגיל." : "לא נמדד פלט.");
+    } else if (!res.boosted) {
+      tone = "warn";
+      head = "⚠️ ההגברה לא הופעלה בפועל (מנוע השמע: " + this.esc(res.backend || "") +
+        "). הצלצול יצא בעוצמה רגילה.";
+    } else if (gainDb !== null && gainDb >= 0.3) {
+      tone = "info";
+      head = "✅ ההגברה עובדת: ב-" + res.volume + "% הצלצול יוצא חזק ב-" +
+        gainDb + " dB מ-100%.";
+    } else {
+      tone = "warn";
+      head = "⚠️ ההגברה הופעלה אבל כמעט לא הוסיפה — הצליל הזה כבר מנוצל עד הסוף.";
+    }
+
+    if (typeof sam.rms === "number") {
+      lines.push("<b>הדגימות שנשלחות לכרטיס הקול:</b> עוצמה " + sam.rms.toFixed(3) +
+        " ← " + sam.boostedRms.toFixed(3) + (gainDb !== null ? " (" + (gainDb > 0 ? "+" : "") + gainDb + " dB)" : "") +
+        "<br><span class=\"sub\">זו המדידה האמיתית של ההגברה: אלה אותם בייטים, לפני ואחרי.</span>");
+    } else if (gainDb !== null) {
+      lines.push("<b>ההגברה על הקובץ:</b> " + (gainDb > 0 ? "+" : "") + gainDb + " dB");
+    }
+
+    const steps = (res.steps || []).filter(s => s.mean !== null)
+      .map(s => s.volume + "% → " + s.mean).join(" · ");
+    if (steps) {
+      let note = "";
+      if (meter.responds === false) note = " המד לא הגיב לשינוי — ייתכן שהוא לא מודד את הזרם הזה.";
+      else if (meter.saturated) {
+        note = " כבר ב-100% המד עומד בתקרה, ולכן הוא לא יכול לדרג הגברה מעליה — " +
+          "בדיוק בגלל זה ההגברה נמדדת על הדגימות ולא עליו.";
+      }
+      lines.push("<b>מד הפלט של Windows:</b> " + steps +
+        "<br><span class=\"sub\">המד יושב לפני בקרת העוצמה של ההתקן, והוא מדווח שיא." + note + "</span>");
+    }
+
+    if (dev.available !== false && typeof dev.volume === "number") {
+      let row = "<b>ההתקן:</b> " + this.esc(dev.name || "") + " — עוצמה " + dev.volume + "%";
+      if (res.headroomDb && res.headroomDb >= 1) {
+        row += '<br>יש עוד <b>' + res.headroomDb + " dB</b> שמונחים בעוצמת ההתקן עצמו. " +
+          '<button class="btn" style="margin-top:6px" onclick="App.saveDeviceVolume(100)">' +
+          "🔊 להעלות ל-100%</button>";
+      }
+      lines.push(row);
+    }
+    if (res.fellBack) {
+      lines.push("<b>שימו לב:</b> ההתקן שנבחר אינו זמין, והמדידה נעשתה על ברירת המחדל.");
+    }
+
+    return '<div class="notice ' + tone + '" style="margin-top:12px">' + head +
+      (lines.length ? "<hr style=\"opacity:.25;margin:10px 0\">" + lines.join("<br><br>") : "") +
+      "</div>";
   },
 
   openManual() {

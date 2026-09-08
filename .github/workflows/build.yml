@@ -46,6 +46,7 @@ jobs:
           python tests/t_update.py
           python tests/t_wake.py
           python tests/t_elevate.py
+          python tests/t_gain.py
 
       - name: Build EXE
         run: python build.py

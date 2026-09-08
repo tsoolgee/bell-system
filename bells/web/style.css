@@ -17,6 +17,11 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* התכונה hidden נדרסת בידי כל כלל display מפורש, וכאן כמעט לכל אלמנט
+   יש אחד. בלי זה שדות שהוסתרו בקוד ממשיכים להופיע - למשל שתי שיטות
+   צאת השבת יחד, או כפתור התקנת עדכון כשאין עדכון. */
+[hidden] { display: none !important; }
+
 body {
   font-family: "Segoe UI", "Assistant", "Arial", sans-serif;
   background: var(--bg);

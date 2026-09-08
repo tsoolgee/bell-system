@@ -12,12 +12,13 @@ import secrets
 import shutil
 import sys
 import threading
+import time
 import urllib.parse
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import (audio, autostart, config, elevate, engine, jewcal, outdev, schedule,
-               sounds, storage, tts, updater, wake)
+from . import (audio, autostart, config, elevate, engine, gain, jewcal, outdev,
+               schedule, sounds, storage, tts, updater, wake)
 
 MAX_UPLOAD = 25 * 1024 * 1024
 ALLOWED_AUDIO = {".mp3", ".wav", ".m4a", ".ogg", ".wma", ".aac"}
@@ -203,6 +204,9 @@ class Handler(BaseHTTPRequestHandler):
             data["selected"] = chosen
             data["canChoose"] = bool(data["devices"])
             data["fellBack"] = audio.device_fell_back()
+            data["appVolume"] = gain.clamp(st.get("volume", 100))
+            data["maxVolume"] = gain.MAX_PERCENT
+            data["backend"] = audio.current_backend()
             return self._json(data)
         if path == "/api/update":
             return self._json(updater.status())
@@ -279,6 +283,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True})
         if path == "/api/audio/test":
             return self._audio_test()
+        if path == "/api/audio/boost-test":
+            return self._boost_test(self._payload())
 
         if not self._authorized():
             return self._error("נדרשת כניסת מנהל", 403)
@@ -298,6 +304,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/sounds/delete": self._delete_sound,
             "/api/sounds/rename": self._rename_sound,
             "/api/autostart": self._set_autostart,
+            "/api/audio/device-volume": self._set_device_volume,
             "/api/update/check": self._check_update,
             "/api/update/install": self._install_update,
             "/api/wake": self._set_wake_timers,
@@ -324,6 +331,9 @@ class Handler(BaseHTTPRequestHandler):
         for key, value in data.items():
             if key in allowed:
                 st[key] = value
+        # מעל 200% אין משמעות, ומתחת ל-0 אין בכלל. שומרים ערך שפוי גם אם
+        # הגיע מלקוח ישן או מקובץ תצורה שנערך ביד.
+        st["volume"] = gain.clamp(st.get("volume", 100))
         config.save()
         engine.log("ההגדרות עודכנו", "system")
         return self._json({"ok": True})
@@ -519,16 +529,103 @@ class Handler(BaseHTTPRequestHandler):
         started = engine.ring("bell_classic", 3, "בדיקת שמע", manual=True)
         # נמדוד את ההתקן שהנגן באמת פתח, לא את זה שביקשנו
         actual = audio.active_device() or ""
-        peak = outdev.measure(2.5, actual or None)
+        detail = outdev.measure_detail(2.5, actual or None)
         audio.stop()
         device = outdev.info(actual or None)
         result = {"ok": True, "started": started, "device": device,
                   "requested": chosen, "actual": actual,
                   "fellBack": audio.device_fell_back()}
-        if peak is not None:
-            result["peak"] = round(peak, 3)
-            result["heard"] = peak > 0.02
+        if detail is not None:
+            result["peak"] = round(detail["peak"], 3)
+            result["mean"] = round(detail["mean"], 3)
+            result["heard"] = detail["peak"] > 0.02
         return self._json(result)
+
+    def _set_device_volume(self, data):
+        """עוצמת ההתקן ב-Windows, מתוך המערכת עצמה.
+
+        זו ההגברה שבאמת מוסיפה עוצמה בקצה: הגברת דגימות מעל 100% מעלה
+        אנרגיה בתוך אותו טווח, אבל אם ההתקן עצמו עומד על 40% - שם מונח
+        רוב מה שחסר. הערך נקרא בחזרה מההתקן, כדי שמה שמוצג יהיה מה שקרה
+        באמת ולא מה שביקשנו שיקרה.
+        """
+        chosen = audio.active_device() or config.settings().get("outputDevice") or ""
+        if "muted" in data and "volume" not in data:
+            result = outdev.set_mute(bool(data.get("muted")), chosen or None)
+        else:
+            result = outdev.set_volume(gain.clamp(data.get("volume", 100)),
+                                       chosen or None)
+        if not result.get("available"):
+            return self._error("אי אפשר לשלוט בעוצמת ההתקן במחשב הזה")
+        engine.log("עוצמת ההתקן %s: %d%%%s"
+                   % (result.get("name", ""), result.get("volume", 0),
+                      " (מושתק)" if result.get("muted") else ""), "system")
+        return self._json(dict(result, ok=True))
+
+    def _boost_test(self, data):
+        """מוכיח שההגברה באמת מגבירה - בשתי מדידות שונות ואמיתיות.
+
+        מד הפלט של Windows יושב *לפני* בקרת העוצמה של ההתקן, והוא מדווח
+        שיא. צלצול נוגע בתקרה כבר ב-100%, ולכן המד יראה שם כמעט אותו
+        מספר גם אחרי ההגברה - הוא לא יכול להעיד לבדו על עוצמה. לכן
+        הבדיקה מודדת שני דברים:
+
+        * את הדגימות שנשלחות לכרטיס הקול, לפני ואחרי ההגברה. שם ההפרש
+          נמדד במדויק, וזה מה שהאוזן שומעת.
+        * את המד עצמו ב-50% מול 100%, שמראה שהוא מגיב ושהאות באמת יוצא.
+        """
+        st = config.settings()
+        percent = gain.clamp(data.get("volume", st.get("volume", 100)))
+        device = st.get("outputDevice") or None
+        path = (engine.sound_path(data.get("sound") or "bell_classic")
+                or engine.sound_path("bell_classic"))
+
+        levels = [50, 100] + ([percent] if percent not in (50, 100) else [])
+        steps = []
+        for level in levels:
+            audio.stop()
+            time.sleep(0.3)
+            started = audio.play(path, duration=4, volume=level, device=device)
+            actual = audio.active_device() or ""
+            detail = outdev.measure_detail(1.5, actual or None) if started else None
+            steps.append({"volume": level, "started": bool(started),
+                          "boosted": audio.boost_active(),
+                          "peak": round(detail["peak"], 3) if detail else None,
+                          "mean": round(detail["mean"], 3) if detail else None})
+        audio.stop()
+
+        actual = audio.active_device() or ""
+        device_info = outdev.info(actual or None)
+        report = audio.boost_report(path, percent)
+        if report is None and percent > 100:
+            # אין מיקסר שאפשר למדוד דרכו - מודדים את הקובץ עצמו
+            value = gain.expected_db(path, percent)
+            report = {"db": value} if value is not None else None
+
+        half, full = steps[0], steps[1]
+        meter = {"available": full["mean"] is not None}
+        if meter["available"] and half["mean"]:
+            meter["responds"] = full["mean"] > half["mean"] * 1.25
+            meter["saturated"] = full["mean"] > 0.85
+            meter["halfToFullDb"] = gain.db(full["mean"], half["mean"])
+        if len(steps) > 2 and steps[2]["mean"] and full["mean"]:
+            meter["boostDb"] = gain.db(steps[2]["mean"], full["mean"])
+
+        volume = device_info.get("volume") if device_info.get("available") else None
+        return self._json({
+            "ok": True,
+            "volume": percent,
+            "steps": steps,
+            "meter": meter,
+            "samples": report,
+            "device": device_info,
+            "backend": audio.current_backend(),
+            "boosted": bool(steps[-1]["boosted"]),
+            "heard": bool(steps[-1]["peak"] and steps[-1]["peak"] > 0.02),
+            "fellBack": audio.device_fell_back(),
+            # כמה dB עוד מונחים בעוצמת ההתקן עצמה, אם אינה על המקסימום
+            "headroomDb": gain.db(100, volume) if volume else None,
+        })
 
     def _set_tts_key(self, data):
         config.settings()["ttsApiKey"] = str(data.get("key") or "").strip()

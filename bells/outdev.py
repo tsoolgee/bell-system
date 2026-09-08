@@ -118,15 +118,70 @@ def info(name=None):
     return _run(read) or {"available": False}
 
 
-def measure(seconds=2.0, name=None, interval=0.08):
-    """שיא הפלט בפועל בנקודת הקצה. None אם לא ניתן למדוד."""
+def set_volume(percent, name=None, unmute=True):
+    """קובע את עוצמת ההתקן ב-Windows ומחזיר את מה שנקרא ממנו בחזרה.
+
+    הקריאה חוזרת ולא מסתמכת על ההצבה: זו כל ההוכחה שההגברה באמת נכנסה.
+    התקן מושתק על 100% הוא עדיין שקט, ולכן העלאת עוצמה מבטלת השתקה.
+    """
+    target = max(0.0, min(1.0, float(percent) / 100.0))
+
+    def apply():
+        found, volume, _ = _endpoint(name)
+        volume.SetMasterVolumeLevelScalar(target, None)
+        if unmute and target > 0 and volume.GetMute():
+            volume.SetMute(0, None)
+        return {
+            "name": found,
+            "requested": round(target * 100),
+            "volume": round(volume.GetMasterVolumeLevelScalar() * 100),
+            "muted": bool(volume.GetMute()),
+            "available": True,
+        }
+
+    return _run(apply) or {"available": False}
+
+
+def set_mute(muted, name=None):
+    def apply():
+        found, volume, _ = _endpoint(name)
+        volume.SetMute(1 if muted else 0, None)
+        return {
+            "name": found,
+            "volume": round(volume.GetMasterVolumeLevelScalar() * 100),
+            "muted": bool(volume.GetMute()),
+            "available": True,
+        }
+
+    return _run(apply) or {"available": False}
+
+
+def measure_detail(seconds=2.0, name=None, interval=0.05):
+    """שיא *וגם* ממוצע של הפלט בפועל. None אם לא ניתן למדוד.
+
+    הממוצע הוא מה שמעיד על הגברה. השיא נעצר ב-1.0, ולכן צליל שכבר נוגע
+    בתקרה לא יזוז שם גם כשמגבירים - אבל האנרגיה כן עולה, והיא נמדדת
+    בממוצע הקריאות. זה בדיוק ההבדל בין "יש אות" ל"יצא חזק יותר".
+    """
     def watch():
         _, _, meter = _endpoint(name)
         peak = 0.0
+        total = 0.0
+        count = 0
         deadline = time.time() + seconds
         while time.time() < deadline:
-            peak = max(peak, meter.GetPeakValue())
+            value = meter.GetPeakValue()
+            peak = max(peak, value)
+            total += value
+            count += 1
             time.sleep(interval)
-        return peak
+        return {"peak": peak, "mean": (total / count) if count else 0.0,
+                "samples": count}
 
     return _run(watch, timeout=seconds + 10)
+
+
+def measure(seconds=2.0, name=None, interval=0.08):
+    """שיא הפלט בפועל בנקודת הקצה. None אם לא ניתן למדוד."""
+    detail = measure_detail(seconds, name, interval)
+    return None if detail is None else detail["peak"]

@@ -8,6 +8,9 @@
   לרמקולי הכיתות גם אם המחשב עצמו מנגן לאוזניות.
 * MCI (winmm) - גיבוי כשאין pygame. מנגן רק להתקן ברירת המחדל.
 
+עוצמה מעל 100% אינה קיימת בשום מנוע - היא נעשית על הדגימות עצמן,
+לפני שהן מגיעות לנגן (bells/gain.py).
+
 חשוב בשני המקרים: MCI קושר alias לתהליכון שפתח אותו, ופקודה מתהליכון
 אחר נכשלת בשקט. לכן *כל* עבודת השמע רצה כאן בתהליכון עבודה יחיד.
 """
@@ -19,6 +22,8 @@ import queue
 import sys
 import threading
 import time
+
+from . import gain
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
@@ -33,6 +38,11 @@ _playing = threading.Event()
 # ההתקן שהמיקסר מאותחל אליו בפועל (None = ברירת המחדל של Windows)
 _active_device = None
 _wanted_device = None
+
+# דגימות מוגברות, לפי (קובץ, זמן שינוי, עוצמה, פורמט המיקסר). ההגברה
+# עצמה לוקחת עשיריות שנייה, וצלצול חוזר על אותו צליל שוב ושוב.
+_boost_cache = {}
+_boost_active = False
 
 if sys.platform == "win32":
     _mci = ctypes.windll.winmm.mciSendStringW
@@ -177,7 +187,8 @@ def device_fell_back():
 # ---------------------------------------------------------------- השמעה
 
 class _Playback:
-    __slots__ = ("kind", "alias", "sound", "channel", "deadline", "clip_ends")
+    __slots__ = ("kind", "alias", "sound", "channel", "deadline", "clip_ends",
+                 "boosted")
 
     def __init__(self, kind, deadline):
         self.kind = kind
@@ -186,6 +197,65 @@ class _Playback:
         self.channel = None
         self.deadline = deadline
         self.clip_ends = 0.0
+        self.boosted = False
+
+
+def _boosted_sound(pygame, path, percent):
+    """Sound שהדגימות שלו כבר מוגברות, או None כשאי אפשר.
+
+    ההגברה נעשית על מה ש-SDL כבר המיר לפורמט המיקסר (get_raw), ולכן
+    היא לא תלויה בקצב הדגימה או במספר הערוצים של הקובץ המקורי.
+    """
+    try:
+        init = pygame.mixer.get_init()
+        if not init or init[1] != -16:
+            return None      # מגבירים רק PCM 16 ביט
+        key = (os.path.abspath(path), os.path.getmtime(path), percent, init)
+        with _mixer_lock:
+            raw = _boost_cache.get(key)
+        if raw is None:
+            raw = gain.apply_pcm16(pygame.mixer.Sound(path).get_raw(), percent)
+            with _mixer_lock:
+                if len(_boost_cache) > 6:
+                    _boost_cache.clear()
+                _boost_cache[key] = raw
+        return pygame.mixer.Sound(buffer=raw)
+    except Exception:
+        return None
+
+
+def boost_active():
+    """האם ההשמעה האחרונה באמת יצאה מוגברת (ולא רק התבקשה)."""
+    return _boost_active
+
+
+def boost_report(path, percent):
+    """מודד את ההגברה על הדגימות שבאמת נשלחות לכרטיס הקול.
+
+    לא הערכה: אלה אותם בייטים שהמיקסר מקבל, לפני ואחרי. None כשהמנוע
+    הנוכחי לא תומך בהגברה (אין pygame, או פורמט מיקסר אחר).
+    """
+    percent = gain.clamp(percent)
+
+    def work():
+        pygame = _pygame()
+        if pygame is None:
+            return None
+        init = pygame.mixer.get_init()
+        if not init or init[1] != -16:
+            return None
+        raw = pygame.mixer.Sound(path).get_raw()
+        louder = gain.apply_pcm16(raw, percent)
+        before, after = gain.rms_pcm16(raw), gain.rms_pcm16(louder)
+        return {
+            "rms": round(before, 4),
+            "peak": round(gain.peak_pcm16(raw), 4),
+            "boostedRms": round(after, 4),
+            "boostedPeak": round(gain.peak_pcm16(louder), 4),
+            "db": gain.db(after, before) if percent > 100 else 0.0,
+        }
+
+    return _on_worker(work, timeout=30)
 
 
 def _start(path, duration, volume, device):
@@ -193,25 +263,39 @@ def _start(path, duration, volume, device):
     _wanted_device = device or None
     deadline = time.time() + max(1, int(duration))
 
+    global _boost_active
+    _boost_active = False
+    percent = gain.clamp(volume)
+
     if _mixer_ready(device or None):
         pygame = _pygame()
         try:
             play = _Playback("pygame", deadline)
-            play.sound = pygame.mixer.Sound(path)
-            play.sound.set_volume(max(0, min(100, int(volume))) / 100.0)
+            louder = _boosted_sound(pygame, path, percent) if percent > 100 else None
+            play.boosted = louder is not None
+            play.sound = louder if louder is not None else pygame.mixer.Sound(path)
+            # כשהדגימות כבר מוגברות הנגן עצמו על 100% - אחרת היינו
+            # מגבירים ומחלישים באותה נשימה.
+            play.sound.set_volume(min(percent, 100) / 100.0)
             # לולאה אינסופית ועצירה בזמן: כך קובץ קצר ממלא את כל המשך
             play.channel = play.sound.play(loops=-1)
+            _boost_active = play.boosted
             _playing.set()
             return play
         except Exception:
             pass  # נופלים ל-MCI
 
-    alias, can_set_volume = _mci_open(path)
+    # ל-MCI אין דרך לקבל דגימות מהזיכרון, ולכן ההגברה עוברת דרך קובץ
+    source = gain.amplified_file(path, percent) if percent > 100 else None
+    boosted = source is not None
+    alias, can_set_volume = _mci_open(source or path)
     if alias is None:
         return None
     if can_set_volume:
-        _send("setaudio %s volume to %d" % (alias, max(0, min(1000, int(volume) * 10))))
+        _send("setaudio %s volume to %d" % (alias, min(percent, 100) * 10))
+    _boost_active = boosted
     play = _Playback("mci", deadline)
+    play.boosted = boosted
     play.alias = alias
     play.clip_ends = time.time() + ((_mci_length(alias) / 1000.0) or 1.0)
     _send("play %s from 0" % alias)
@@ -309,6 +393,8 @@ def reset():
     """
     global _active_device
     stop()
+    with _mixer_lock:
+        _boost_cache.clear()
 
     def drop():
         global _active_device

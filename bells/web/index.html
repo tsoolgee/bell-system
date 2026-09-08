@@ -169,9 +169,22 @@
           <label class="field" id="outputDeviceField"><span>התקן הפלט לצלצולים</span>
             <select id="setOutput" onchange="App.saveOutputDevice()"></select>
           </label>
-          <label class="field"><span>עוצמת שמע — <b id="volLabel">90%</b></span>
-            <input type="range" id="setVolume" min="0" max="100" oninput="document.getElementById('volLabel').textContent=this.value+'%'">
+          <label class="field"><span>עוצמת הצלצול — <b id="volLabel">100%</b> <span class="sub" id="volHint"></span></span>
+            <input type="range" id="setVolume" min="0" max="200" step="5"
+                   oninput="App.volumeMoved(this.value)" onchange="App.saveVolume()">
+            <small class="sub">מעל 100% המערכת מגבירה את הצליל עצמו. אפשר עד 200%.</small>
           </label>
+          <label class="field" id="deviceVolumeField" hidden>
+            <span>עוצמת ההתקן ב-Windows — <b id="devVolLabel">—</b></span>
+            <input type="range" id="setDeviceVolume" min="0" max="100"
+                   oninput="document.getElementById('devVolLabel').textContent=this.value+'%'"
+                   onchange="App.saveDeviceVolume(this.value)">
+            <small class="sub">אותו מחוון שבשעון של Windows — כאן אפשר להעלות אותו בלי לצאת מהמערכת.</small>
+          </label>
+          <div class="row" id="deviceVolumeActions" hidden>
+            <button class="btn" style="flex:1" onclick="App.saveDeviceVolume(100)">🔊 העלאת ההתקן ל-100%</button>
+            <button class="btn" style="flex:1" id="unmuteBtn" hidden onclick="App.unmuteDevice()">🔈 ביטול השתקה</button>
+          </div>
           <div class="toggle">
             <div class="txt"><b>הפעלה אוטומטית עם הדלקת המחשב</b><small>המערכת תעלה לבד בכל כניסה למחשב</small></div>
             <div class="switch" id="swAutostart" onclick="App.toggleAutostart()"></div>
@@ -185,7 +198,10 @@
             <div class="switch" id="swPower" onclick="App.togglePower()"></div>
           </div>
           <div id="audioDevice" style="margin-top:14px"></div>
-          <button class="btn wide" id="audioTestBtn" onclick="App.testSound()">▶️ בדיקת שמע</button>
+          <div class="row">
+            <button class="btn" style="flex:1" id="audioTestBtn" onclick="App.testSound()">▶️ בדיקת שמע</button>
+            <button class="btn" style="flex:1" id="boostTestBtn" onclick="App.testBoost()">📈 בדיקת הגברה</button>
+          </div>
           <div id="audioTestResult"></div>
         </div>
 
