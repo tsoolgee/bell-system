@@ -66,7 +66,9 @@ check("הרשימה ממוינת לפי שעה",
 
 print("--- השבתות ---")
 # מתחילים ביום ראשון הקרוב: טווח יחסי כדי שהבדיקה לא תתיישן, ובלי שבת
-# בתוכו - שבת גוברת על השבתה ידנית, ואז הסיבה שתדווח תהיה "שבת".
+# בתוכו. שבת או חג גוברים על השבתה ידנית - הם הסיבה החזקה יותר, והיא
+# זו שתדווח. לכן הבדיקה דורשת שהימים יהיו חסומים, ושהסיבה תהיה ההשבתה
+# או החג של אותו יום.
 TODAY = datetime.date.today()
 _sunday = TODAY + datetime.timedelta(days=(6 - TODAY.weekday()) % 7 or 7)
 RANGE = [_sunday + datetime.timedelta(days=i) for i in (0, 1, 2)]
@@ -85,7 +87,9 @@ code, res = call("/api/calendar?days=10")
 wanted = {d.strftime("%d/%m/%Y") for d in RANGE}
 blocked = [d for d in res["days"] if d["date"] in wanted]
 check("ההשבתה חוסמת את הימים",
-      len(blocked) == 3 and all(d["blocked"] and d["reason"] == "חופשת בדיקה" for d in blocked),
+      len(blocked) == 3 and all(d["blocked"] for d in blocked), blocked)
+check("ההשבתה היא הסיבה, אלא אם חג גובר עליה",
+      all(d["reason"] == "חופשת בדיקה" or d["reason"] == d["holiday"] for d in blocked),
       blocked)
 
 code, res = call("/api/exceptions/save", {"name": "חנוכה עברי", "type": "hebrew",
@@ -144,6 +148,61 @@ for e in list(cfg["exceptions"]):
 
 code, res = call("/api/restore", raw=b"not a backup at all")
 check("קובץ גיבוי פגום נדחה", code == 400, res)
+
+print("--- עוצמה והגברה ---")
+code, audio_before = call("/api/audio")
+started_volume = audio_before.get("appVolume")
+
+call("/api/settings", {"volume": 999})
+code, res = call("/api/audio")
+check("עוצמה מעל המקסימום נחתכת ל-200", res.get("appVolume") == 200, res.get("appVolume"))
+call("/api/settings", {"volume": -50})
+code, res = call("/api/audio")
+check("עוצמה שלילית נחתכת לאפס", res.get("appVolume") == 0, res.get("appVolume"))
+call("/api/settings", {"volume": 160})
+
+if not audio_before.get("available"):
+    print("       דילוג: אין שליטה בעוצמת ההתקן במכונה הזו")
+else:
+    # הבדיקה נוגעת בעוצמה האמיתית של המחשב, ולכן היא מחזירה אותה בסוף
+    device_before, muted_before = audio_before["volume"], audio_before["muted"]
+    code, res = call("/api/audio/device-volume", {"volume": 55})
+    check("עוצמת ההתקן נקבעת", code == 200 and res.get("volume") == 55, res)
+    code, res = call("/api/audio/device-volume", {"volume": 400})
+    check("עוצמת התקן מעל 100 נחתכת", res.get("volume") == 100, res)
+    code, res = call("/api/audio/device-volume", {"muted": True})
+    check("השתקת ההתקן", res.get("muted") is True, res)
+    code, res = call("/api/audio/device-volume", {"volume": 60})
+    check("העלאת עוצמה מבטלת השתקה", res.get("muted") is False, res)
+    call("/api/audio/device-volume", {"volume": device_before})
+    if muted_before:
+        call("/api/audio/device-volume", {"muted": True})
+    code, res = call("/api/audio")
+    check("הבדיקה החזירה את עוצמת ההתקן לקדמותה",
+          res.get("volume") == device_before and res.get("muted") == muted_before,
+          (device_before, muted_before, res.get("volume"), res.get("muted")))
+
+code, res = call("/api/audio/boost-test", {"volume": 180})
+check("בדיקת ההגברה רצה", code == 200 and res.get("ok"), code)
+if code == 200:
+    check("נמדדו שלוש רמות", len(res.get("steps", [])) == 3, res.get("steps"))
+    check("הרמות הן 50, 100 והנבחרת",
+          [s["volume"] for s in res.get("steps", [])] == [50, 100, 180], res.get("steps"))
+    if res.get("backend") == "pygame":
+        check("ההגברה הופעלה בפועל", res.get("boosted") is True, res)
+        sam = res.get("samples") or {}
+        check("ההגברה נמדדה על הדגימות", sam.get("db", 0) > 0.5, sam)
+        check("הדגימות המוגברות לא חורגות מהתקרה",
+              sam.get("boostedPeak", 2) <= 1.0, sam)
+    else:
+        print("       מנוע השמע: %s - אין הגברה למדוד" % res.get("backend"))
+
+code, res = call("/api/audio/boost-test", {"volume": 100})
+check("ב-100% לא מנסים להגביר", res.get("boosted") is False, res.get("boosted"))
+check("ב-100% נמדדות שתי רמות בלבד", len(res.get("steps", [])) == 2, res.get("steps"))
+
+if started_volume is not None:
+    call("/api/settings", {"volume": started_volume})
 
 print()
 print("נכשלו: %d" % len(fails))

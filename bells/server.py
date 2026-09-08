@@ -612,6 +612,11 @@ class Handler(BaseHTTPRequestHandler):
             meter["boostDb"] = gain.db(steps[2]["mean"], full["mean"])
 
         volume = device_info.get("volume") if device_info.get("available") else None
+        # שורה אחת ביומן על כל הבדיקה, לא שלוש על כל השמעה
+        engine.log("בדיקת הגברה ב-%d%%: %s" % (
+            percent,
+            ("+%s dB" % report["db"]) if report and report.get("db") else "ללא הגברה"),
+            "system")
         return self._json({
             "ok": True,
             "volume": percent,
